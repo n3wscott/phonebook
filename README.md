@@ -12,8 +12,8 @@ Grandstream-compatible XML phonebook service written in Go.
 ## Getting Started
 
 ```bash
-go build -o phonebookd ./cmd/phonebookd
-./phonebookd --dir ./examples --addr :8080 --base-path /xml/
+go build -o phonebook .
+./phonebook --dir ./examples --addr :8080 --base-path /xml/
 ```
 
 Point the Grandstream “Phone Book XML Server Path” at `http://<host>:8080/xml/`. Phones will request `/xml/phonebook.xml`.
