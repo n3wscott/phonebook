@@ -11,13 +11,11 @@ import (
 func Build(contacts []model.Contact) ([]byte, error) {
 	book := xmlPhonebook{Contacts: make([]xmlContact, 0, len(contacts))}
 	for _, c := range contacts {
+		phones := collectPhones(c)
 		xc := xmlContact{
 			LastName:  strings.TrimSpace(c.LastName),
 			FirstName: strings.TrimSpace(c.FirstName),
-			Phone: xmlPhone{
-				Number:       strings.TrimSpace(c.Phone),
-				AccountIndex: c.AccountIndex,
-			},
+			Phones:    phones,
 		}
 		if c.GroupID != nil {
 			xc.Groups = &xmlGroups{GroupID: *c.GroupID}
@@ -36,6 +34,27 @@ func Build(contacts []model.Contact) ([]byte, error) {
 	return final, nil
 }
 
+func collectPhones(c model.Contact) []xmlPhone {
+	if len(c.Phones) == 0 {
+		idx := 1
+		if c.AccountIndex != nil {
+			idx = *c.AccountIndex
+		}
+		return []xmlPhone{{
+			Number:       strings.TrimSpace(c.Extension),
+			AccountIndex: idx,
+		}}
+	}
+	out := make([]xmlPhone, 0, len(c.Phones))
+	for _, p := range c.Phones {
+		out = append(out, xmlPhone{
+			Number:       strings.TrimSpace(p.Number),
+			AccountIndex: p.AccountIndex,
+		})
+	}
+	return out
+}
+
 type xmlPhonebook struct {
 	XMLName  xml.Name     `xml:"AddressBook"`
 	Contacts []xmlContact `xml:"Contact"`
@@ -44,7 +63,7 @@ type xmlPhonebook struct {
 type xmlContact struct {
 	LastName  string     `xml:"LastName,omitempty"`
 	FirstName string     `xml:"FirstName,omitempty"`
-	Phone     xmlPhone   `xml:"Phone"`
+	Phones    []xmlPhone `xml:"Phone"`
 	Groups    *xmlGroups `xml:"Groups,omitempty"`
 }
 

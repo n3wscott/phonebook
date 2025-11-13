@@ -1,25 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <AddressBook>
   <Contact>
-    <LastName>Doe</LastName>
-    <FirstName>John</FirstName>
+    <LastName>Nichols</LastName>
+    <FirstName>Scott</FirstName>
     <Phone>
-      <phonenumber>8000</phonenumber>
+      <phonenumber>101</phonenumber>
       <accountindex>1</accountindex>
     </Phone>
     <Groups>
-      <groupid>0</groupid>
-    </Groups>
-  </Contact>
-  <Contact>
-    <LastName>Khan</LastName>
-    <FirstName>Amir</FirstName>
-    <Phone>
-      <phonenumber>+15550101</phonenumber>
-      <accountindex>1</accountindex>
-    </Phone>
-    <Groups>
-      <groupid>1</groupid>
+      <groupid>2</groupid>
     </Groups>
   </Contact>
   <Contact>
@@ -30,25 +19,14 @@
       <accountindex>2</accountindex>
     </Phone>
     <Groups>
-      <groupid>2</groupid>
+      <groupid>1</groupid>
     </Groups>
   </Contact>
   <Contact>
-    <LastName>Patel</LastName>
-    <FirstName>Nina</FirstName>
+    <LastName>Khan</LastName>
+    <FirstName>Amir</FirstName>
     <Phone>
-      <phonenumber>7000</phonenumber>
-      <accountindex>2</accountindex>
-    </Phone>
-    <Groups>
-      <groupid>2</groupid>
-    </Groups>
-  </Contact>
-  <Contact>
-    <LastName>Reed</LastName>
-    <FirstName>Omar</FirstName>
-    <Phone>
-      <phonenumber>7100</phonenumber>
+      <phonenumber>+15550101</phonenumber>
       <accountindex>1</accountindex>
     </Phone>
     <Groups>
@@ -59,7 +37,7 @@
     <LastName>Yu</LastName>
     <FirstName>Zoe</FirstName>
     <Phone>
-      <phonenumber>7200</phonenumber>
+      <phonenumber>202</phonenumber>
       <accountindex>3</accountindex>
     </Phone>
     <Groups>
@@ -67,3 +45,4 @@
     </Groups>
   </Contact>
 </AddressBook>
+

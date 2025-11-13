@@ -10,25 +10,33 @@ import (
 	"time"
 
 	"github.com/n3wscott/phonebook/internal/httpapi"
-	"github.com/n3wscott/phonebook/internal/load"
+	"github.com/n3wscott/phonebook/internal/project"
 	"github.com/n3wscott/phonebook/internal/testutil"
-	"github.com/n3wscott/phonebook/internal/xmlgen"
 )
 
 func TestHotReloadFlow(t *testing.T) {
 	dir := t.TempDir()
-	file := filepath.Join(dir, "contacts.yaml")
-	writeFile(t, file, `- first_name: Alpha
-  last_name: Tester
-  phone: "1000"
-  account_index: 1
+	writeConfig(t, dir)
+	contactsDir := filepath.Join(dir, "contacts")
+	if err := os.MkdirAll(contactsDir, 0o755); err != nil {
+		t.Fatalf("mkdir contacts: %v", err)
+	}
+	file := filepath.Join(contactsDir, "users.yaml")
+	writeFile(t, file, `contacts:
+  - id: alpha
+    first_name: Alpha
+    last_name: Tester
+    ext: "1000"
+    password: "pw1"
+    account_index: 1
 `)
 
 	logger := testutil.NewTestLogger()
-	loader := load.New(dir, logger)
-	srv := httpapi.NewServer(httpapi.Config{Addr: ":0", BasePath: "/xml/"}, logger)
+	builder := &project.Builder{Dir: dir, Logger: logger}
+	state := buildState(t, builder)
 
-	rebuild(t, loader, srv)
+	srv := httpapi.NewServer(httpapi.Config{Addr: ":0", BasePath: "/xml/"}, logger)
+	srv.Update(state.Contacts, state.Phonebook, state.LastUpdate)
 
 	handler := srv.Handler()
 	req := httptest.NewRequest(http.MethodGet, "/xml/phonebook.xml", nil)
@@ -45,13 +53,17 @@ func TestHotReloadFlow(t *testing.T) {
 		t.Fatalf("missing ETag")
 	}
 
-	time.Sleep(1100 * time.Millisecond)
-	writeFile(t, file, `- first_name: Beta
-  last_name: Tester
-  phone: "1000"
-  account_index: 1
+	time.Sleep(10 * time.Millisecond)
+	writeFile(t, file, `contacts:
+  - id: beta
+    first_name: Beta
+    last_name: Tester
+    ext: "1000"
+    password: "pw1"
+    account_index: 1
 `)
-	rebuild(t, loader, srv)
+	state = buildState(t, builder)
+	srv.Update(state.Contacts, state.Phonebook, state.LastUpdate)
 
 	req = httptest.NewRequest(http.MethodGet, "/xml/phonebook.xml", nil)
 	rr = httptest.NewRecorder()
@@ -67,17 +79,40 @@ func TestHotReloadFlow(t *testing.T) {
 	}
 }
 
-func rebuild(t *testing.T, loader *load.Loader, srv *httpapi.Server) {
+func writeConfig(t *testing.T, dir string) {
 	t.Helper()
-	res, err := loader.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+	cfg := `global:
+  user_agent: "TestAgent"
+
+transports:
+  - name: "transport-udp"
+    protocol: "udp"
+    bind: "0.0.0.0"
+
+endpoint_templates:
+  - name: "endpoint-template"
+    context: "internal"
+    disallow: ["all"]
+    allow: ["ulaw"]
+
+dialplan:
+  context: "internal"
+`
+	def := `endpoint:
+  template: "endpoint-template"
+auth:
+  username_equals_ext: true
+aor:
+  max_contacts: 1
+  remove_existing: true
+  qualify_frequency: 30
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
-	xml, err := xmlgen.Build(res.Contacts)
-	if err != nil {
-		t.Fatalf("xml build error = %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "defaults.yaml"), []byte(def), 0o644); err != nil {
+		t.Fatalf("write defaults: %v", err)
 	}
-	srv.Update(res.Contacts, xml, res.LastModified())
 }
 
 func writeFile(t *testing.T, path, contents string) {
@@ -85,4 +120,13 @@ func writeFile(t *testing.T, path, contents string) {
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("failed to write %s: %v", path, err)
 	}
+}
+
+func buildState(t *testing.T, builder *project.Builder) project.State {
+	t.Helper()
+	state, err := builder.Build()
+	if err != nil {
+		t.Fatalf("builder.Build() error = %v", err)
+	}
+	return state
 }

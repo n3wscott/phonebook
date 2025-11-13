@@ -12,17 +12,22 @@ func TestBuildMatchesGolden(t *testing.T) {
 	gid := 0
 	contacts := []model.Contact{
 		{
-			FirstName:    "John",
-			LastName:     "Doe",
-			Phone:        "8000",
-			AccountIndex: 1,
-			GroupID:      &gid,
+			FirstName: "John",
+			LastName:  "Doe",
+			Extension: "8000",
+			GroupID:   &gid,
+			Phones: []model.Phone{
+				{Number: "8000", AccountIndex: 1},
+				{Number: "8100", AccountIndex: 2},
+			},
 		},
 		{
-			FirstName:    "Lily",
-			LastName:     "Lee",
-			Phone:        "6000",
-			AccountIndex: 2,
+			FirstName: "Lily",
+			LastName:  "Lee",
+			Extension: "6000",
+			Phones: []model.Phone{
+				{Number: "6000", AccountIndex: 2},
+			},
 		},
 	}
 

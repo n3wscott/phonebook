@@ -2,122 +2,268 @@ package config
 
 import (
 	"errors"
-	"flag"
 	"fmt"
-	"log/slog"
 	"os"
-	"path"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
-// Config captures all runtime configuration.
-type Config struct {
-	Dir      string
-	Addr     string
-	BasePath string
-	TLSCert  string
-	TLSKey   string
-	LogLevel string
-	Debounce time.Duration
+// FileMeta tracks source files for change detection.
+type FileMeta struct {
+	Path    string
+	ModTime time.Time
 }
 
-const (
-	defaultAddr     = ":8080"
-	defaultBasePath = "/"
-	defaultLogLevel = "info"
-	defaultDebounce = 250 * time.Millisecond
-)
+// Config represents config.yaml.
+type Config struct {
+	Global            map[string]any   `yaml:"global"`
+	Network           Network          `yaml:"network"`
+	Transports        []Transport      `yaml:"transports"`
+	EndpointTemplates []EndpointConfig `yaml:"endpoint_templates"`
+	Dialplan          Dialplan         `yaml:"dialplan"`
+	Server            Server           `yaml:"server"`
+}
 
-// Load parses CLI flags and environment variables to produce a Config.
-func Load(args []string) (Config, error) {
-	cfg := Config{Debounce: defaultDebounce}
+// Network aggregates transport-related addresses.
+type Network struct {
+	ExternalSignalingAddress string         `yaml:"external_signaling_address"`
+	ExternalMediaAddress     string         `yaml:"external_media_address"`
+	LocalNet                 []string       `yaml:"local_net"`
+	Extra                    map[string]any `yaml:",inline"`
+}
 
-	fs := flag.NewFlagSet("phonebookd", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+// Transport describes a pjsip transport section.
+type Transport struct {
+	Name     string         `yaml:"name"`
+	Protocol string         `yaml:"protocol"`
+	Bind     string         `yaml:"bind"`
+	Extra    map[string]any `yaml:",inline"`
+}
 
-	dirEnv := getenv("PHONEBOOK_DIR", "")
-	addrEnv := getenv("PHONEBOOK_ADDR", defaultAddr)
-	baseEnv := getenv("PHONEBOOK_BASE_PATH", defaultBasePath)
-	tlsCertEnv := getenv("PHONEBOOK_TLS_CERT", "")
-	tlsKeyEnv := getenv("PHONEBOOK_TLS_KEY", "")
-	logLevelEnv := getenv("PHONEBOOK_LOG_LEVEL", defaultLogLevel)
+// EndpointConfig defines a template block for endpoints.
+type EndpointConfig struct {
+	Name  string         `yaml:"name"`
+	Extra map[string]any `yaml:",inline"`
+}
 
-	fs.StringVar(&cfg.Dir, "dir", dirEnv, "Root directory containing YAML files (required).")
-	fs.StringVar(&cfg.Dir, "d", dirEnv, "Root directory containing YAML files (required).")
-	fs.StringVar(&cfg.Addr, "addr", addrEnv, "HTTP listen address (default :8080).")
-	fs.StringVar(&cfg.BasePath, "base-path", baseEnv, "Base HTTP path prefix (default /).")
-	fs.StringVar(&cfg.TLSCert, "tls-cert", tlsCertEnv, "Path to TLS certificate (optional).")
-	fs.StringVar(&cfg.TLSKey, "tls-key", tlsKeyEnv, "Path to TLS private key (optional).")
-	fs.StringVar(&cfg.LogLevel, "log-level", logLevelEnv, "Log level: debug, info, error (default info).")
+// Dialplan config.
+type Dialplan struct {
+	Context string `yaml:"context"`
+}
 
-	if err := fs.Parse(args); err != nil {
-		return Config{}, err
+// Server config section.
+type Server struct {
+	Addr     string `yaml:"addr"`
+	BasePath string `yaml:"base_path"`
+}
+
+// Defaults defines repo-wide per-contact defaults.
+type Defaults struct {
+	AOR      AORDefaults
+	Auth     AuthDefaults
+	Endpoint EndpointDefaults
+}
+
+// AORDefaults applies to contact AOR blocks.
+type AORDefaults struct {
+	MaxContacts      int
+	RemoveExisting   bool
+	QualifyFrequency int
+}
+
+// AuthDefaults configures auth fallback behavior.
+type AuthDefaults struct {
+	UsernameEqualsExt bool
+}
+
+// EndpointDefaults selects the template to inherit.
+type EndpointDefaults struct {
+	Template string
+}
+
+var builtinDefaults = Defaults{
+	AOR: AORDefaults{
+		MaxContacts:      1,
+		RemoveExisting:   true,
+		QualifyFrequency: 30,
+	},
+	Auth: AuthDefaults{
+		UsernameEqualsExt: true,
+	},
+	Endpoint: EndpointDefaults{
+		Template: "endpoint-template",
+	},
+}
+
+// Load reads config.yaml and defaults.yaml from dir.
+func Load(dir string) (Config, Defaults, []FileMeta, error) {
+	configPath := filepath.Join(dir, "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return Config{}, Defaults{}, nil, fmt.Errorf("read config.yaml: %w", err)
+	}
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return Config{}, Defaults{}, nil, fmt.Errorf("parse config.yaml: %w", err)
+	}
+	cfg.normalize()
+
+	metas := []FileMeta{}
+	if info, err := os.Stat(configPath); err == nil {
+		metas = append(metas, FileMeta{Path: configPath, ModTime: info.ModTime()})
 	}
 
-	if cfg.Dir == "" {
-		return Config{}, errors.New("--dir (or PHONEBOOK_DIR) is required")
+	defs := builtinDefaults
+	defPath := filepath.Join(dir, "defaults.yaml")
+	if raw, err := os.ReadFile(defPath); err == nil {
+		var file defaultsFile
+		if err := yaml.Unmarshal(raw, &file); err != nil {
+			return Config{}, Defaults{}, nil, fmt.Errorf("parse defaults.yaml: %w", err)
+		}
+		defs = mergeDefaults(builtinDefaults, file)
+		if info, err := os.Stat(defPath); err == nil {
+			metas = append(metas, FileMeta{Path: defPath, ModTime: info.ModTime()})
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Config{}, Defaults{}, nil, fmt.Errorf("read defaults.yaml: %w", err)
 	}
 
-	cfg.BasePath = sanitizeBasePath(cfg.BasePath)
-	cfg.LogLevel = strings.ToLower(cfg.LogLevel)
-	if cfg.LogLevel == "" {
-		cfg.LogLevel = defaultLogLevel
-	}
-	if _, err := toSlogLevel(cfg.LogLevel); err != nil {
-		return Config{}, err
+	if err := validate(cfg, defs); err != nil {
+		return Config{}, Defaults{}, nil, err
 	}
 
-	if (cfg.TLSCert == "") != (cfg.TLSKey == "") {
-		return Config{}, errors.New("both --tls-cert and --tls-key must be provided together")
-	}
+	return cfg, defs, metas, nil
+}
 
-	return cfg, nil
+func (c *Config) normalize() {
+	if c.Global == nil {
+		c.Global = map[string]any{}
+	}
+	if c.Network.Extra == nil {
+		c.Network.Extra = map[string]any{}
+	}
+	for i := range c.Transports {
+		if c.Transports[i].Extra == nil {
+			c.Transports[i].Extra = map[string]any{}
+		}
+	}
+	for i := range c.EndpointTemplates {
+		if c.EndpointTemplates[i].Extra == nil {
+			c.EndpointTemplates[i].Extra = map[string]any{}
+		}
+	}
+	if c.Server.Addr == "" {
+		c.Server.Addr = ":8080"
+	}
+	c.Server.BasePath = sanitizeBasePath(c.Server.BasePath)
+	if c.Dialplan.Context == "" {
+		c.Dialplan.Context = "internal"
+	}
 }
 
 func sanitizeBasePath(p string) string {
 	if p == "" {
-		p = defaultBasePath
+		return "/"
 	}
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p
 	}
-	// path.Clean removes trailing slash; preserve when not root
-	cleaned := path.Clean(p)
-	if cleaned != "/" && strings.HasSuffix(p, "/") {
-		cleaned += "/"
+	if !strings.HasSuffix(p, "/") {
+		p = p + "/"
 	}
-	if cleaned == "" {
-		cleaned = "/"
-	}
-	// ensure trailing slash for non-root to make joining easier
-	if cleaned != "/" && !strings.HasSuffix(cleaned, "/") {
-		cleaned += "/"
-	}
-	return cleaned
+	return pathCleanPreserve(p)
 }
 
-func getenv(key, fallback string) string {
-	if val, ok := os.LookupEnv(key); ok {
-		return val
+func pathCleanPreserve(p string) string {
+	parts := strings.Split(p, "/")
+	stack := []string{}
+	for _, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+			continue
+		}
+		stack = append(stack, part)
 	}
-	return fallback
+	res := "/" + strings.Join(stack, "/")
+	if p == "/" {
+		return "/"
+	}
+	if strings.HasSuffix(p, "/") && !strings.HasSuffix(res, "/") {
+		res += "/"
+	}
+	return res
 }
 
-// ToSlogLevel converts string log levels into slog levels.
-func ToSlogLevel(level string) (slog.Level, error) {
-	return toSlogLevel(strings.ToLower(level))
+type defaultsFile struct {
+	AOR struct {
+		MaxContacts      *int  `yaml:"max_contacts"`
+		RemoveExisting   *bool `yaml:"remove_existing"`
+		QualifyFrequency *int  `yaml:"qualify_frequency"`
+	} `yaml:"aor"`
+	Auth struct {
+		UsernameEqualsExt *bool `yaml:"username_equals_ext"`
+	} `yaml:"auth"`
+	Endpoint struct {
+		Template *string `yaml:"template"`
+	} `yaml:"endpoint"`
 }
 
-func toSlogLevel(level string) (slog.Level, error) {
-	switch strings.ToLower(level) {
-	case "debug":
-		return slog.LevelDebug, nil
-	case "info":
-		return slog.LevelInfo, nil
-	case "error":
-		return slog.LevelError, nil
-	default:
-		return 0, fmt.Errorf("invalid log level %q", level)
+func mergeDefaults(base Defaults, override defaultsFile) Defaults {
+	out := base
+	if override.AOR.MaxContacts != nil {
+		out.AOR.MaxContacts = *override.AOR.MaxContacts
 	}
+	if override.AOR.QualifyFrequency != nil {
+		out.AOR.QualifyFrequency = *override.AOR.QualifyFrequency
+	}
+	if override.AOR.RemoveExisting != nil {
+		out.AOR.RemoveExisting = *override.AOR.RemoveExisting
+	}
+	if override.Auth.UsernameEqualsExt != nil {
+		out.Auth.UsernameEqualsExt = *override.Auth.UsernameEqualsExt
+	}
+	if override.Endpoint.Template != nil {
+		out.Endpoint.Template = *override.Endpoint.Template
+	}
+	return out
+}
+
+func validate(cfg Config, defs Defaults) error {
+	if len(cfg.Transports) == 0 {
+		return errors.New("config.yaml must define at least one transport")
+	}
+	if defs.Endpoint.Template == "" {
+		return errors.New("defaults endpoint template is required")
+	}
+
+	names := map[string]struct{}{}
+	for _, tmpl := range cfg.EndpointTemplates {
+		if tmpl.Name == "" {
+			return errors.New("endpoint template missing name")
+		}
+		names[tmpl.Name] = struct{}{}
+	}
+	if _, ok := names[defs.Endpoint.Template]; !ok {
+		return fmt.Errorf("endpoint template %q referenced by defaults not found in config.yaml", defs.Endpoint.Template)
+	}
+	return nil
+}
+
+// TemplateNames returns configured template names.
+func (c Config) TemplateNames() []string {
+	out := make([]string, 0, len(c.EndpointTemplates))
+	for _, t := range c.EndpointTemplates {
+		out = append(out, t.Name)
+	}
+	sort.Strings(out)
+	return out
 }

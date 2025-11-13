@@ -1,0 +1,36 @@
+global:
+  user_agent: "Asterisk"
+
+network:
+  external_signaling_address: "100.200.100.41"
+  external_media_address: "100.200.100.41"
+  local_net:
+    - "192.168.86.0/24"
+    - "100.64.0.0/10"
+
+transports:
+  - name: "transport-udp"
+    protocol: "udp"
+    bind: "0.0.0.0:5060"
+    tos: 184
+
+endpoint_templates:
+  - name: "endpoint-template"
+    context: "internal"
+    disallow:
+      - "all"
+    allow:
+      - "ulaw"
+    direct_media: false
+    rtp_symmetric: true
+    force_rport: true
+    rewrite_contact: true
+    transport: "transport-udp"
+    timers: "no"
+
+dialplan:
+  context: "internal"
+
+server:
+  addr: ":8080"
+  base_path: "/xml/"

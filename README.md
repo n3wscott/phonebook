@@ -1,61 +1,80 @@
 # phonebook
 
-Grandstream-compatible XML phonebook service written in Go.
+Grandstream phonebook server + Asterisk config generator backed by a single YAML source of truth.
 
-## Features
-- Recursively loads one or more YAML files and normalizes them into Grandstream’s `phonebook.xml` format.
-- Watches the configured directory with `fsnotify` and hot-reloads on create/modify/delete (250 ms debounce).
-- Deterministic de-duplication (keyed on last name, first name, phone, account index) with override preference for files deeper in the tree and newer mtimes.
-- Serves `phonebook.xml`, `healthz`, and optional `debug` endpoints with proper caching headers (`ETag`, `Last-Modified`, `If-None-Match`, `If-Modified-Since`).
-- Structured logging via `slog`, optional TLS, configurable base path.
+## Layout
 
-## Getting Started
+```
+<dir>/
+  config.yaml     # required – transports, templates, dialplan, server hints
+  defaults.yaml   # optional – repo-wide contact defaults
+  contacts/       # required – one or more YAML files (list or contacts:)
+    **/*.yaml
+```
+
+`config.yaml` defines `[global]`, transports, endpoint templates, and dialplan context used when rendering `pjsip.conf`/`extensions.conf`. `defaults.yaml` provides repo-wide fallback values (see [examples](examples/)).
+
+Each contact entry contains PBX credentials + XML fields:
+
+```yaml
+contacts:
+  - id: "scott"
+    first_name: "Scott"
+    last_name: "Nichols"
+    ext: "101"
+    password: "secret101"
+    account_index: 1         # default for fallback phonebook entry
+    group_id: 2
+    phones:                  # optional – defaults to the extension
+      - number: "6000"
+        account_index: 2
+    auth:
+      username: "101"
+    aor:
+      max_contacts: 1
+```
+
+Validation highlights:
+- `ext`/`password` required; duplicates are allowed but last writer wins (with a warning).
+- Phone numbers may only contain digits plus `+ * # ,` (spaces are stripped).
+- `account_index` ∈ `[1,6]`, `group_id` ∈ `[0,9]`.
+- `auth.username` defaults to `ext` when `defaults.yaml` sets `username_equals_ext: true`.
+
+## Commands
 
 ```bash
 go build -o phonebook .
-./phonebook --dir ./examples --addr :8080 --base-path /xml/
+
+# Serve phonebook.xml (plus optional staged Asterisk configs)
+./phonebook serve --dir ./examples --addr :8080 --base-path /xml/ --out ./out
+
+# Generate phonebook.xml once
+./phonebook generate xml --dir ./examples --out ./phonebook.xml
+
+# Generate pjsip.conf + extensions.conf (optionally apply/reload)
+./phonebook generate asterisk --dir ./examples --dest ./out [--apply]
+
+# Validate the tree without writing anything
+./phonebook validate --dir ./examples
 ```
 
-Point the Grandstream “Phone Book XML Server Path” at `http://<host>:8080/xml/`. Phones will request `/xml/phonebook.xml`.
+`serve` watches `--dir` recursively (fsnotify + 250 ms debounce), hot-rebuilds the in-memory dataset, updates the HTTP snapshot (with `ETag` / `Last-Modified`), and optionally refreshes staged `pjsip.conf`/`extensions.conf` under `--out`. TLS (`--tls-cert/--tls-key`), structured logging (`--log-level`), and base-path overrides match the previous behavior; unspecified paths fall back to the values in `config.yaml`.
 
-### Flags & Env Vars
+`generate asterisk --apply` writes atomically to `--dest` and then runs `asterisk -rx "pjsip reload"` and `dialplan reload`. `serve` never mutates `/etc/asterisk`.
 
-| Flag | Env | Description |
-| --- | --- | --- |
-| `--dir`, `-d` | `PHONEBOOK_DIR` | **Required.** Root directory to scan for YAML files (recursive). |
-| `--addr` | `PHONEBOOK_ADDR` | HTTP listen address (default `:8080`). |
-| `--base-path` | `PHONEBOOK_BASE_PATH` | Base URL path prefix (default `/`). Use `/xml/` for phone-friendly URLs. |
-| `--tls-cert`, `--tls-key` | `PHONEBOOK_TLS_CERT`, `PHONEBOOK_TLS_KEY` | Serve HTTPS when both are provided. |
-| `--log-level` | `PHONEBOOK_LOG_LEVEL` | `debug`, `info` (default), or `error`. Debug mode enables the `/debug` endpoint. |
+## HTTP Endpoints
 
-### YAML Schema
+- `${basePath}/phonebook.xml` – Grandstream XML (UTF‑8, multi-`<Phone>` support, caching headers)
+- `${basePath}/healthz` – `{"ok":true,"contacts":N,"version":V}`
+- `${basePath}/debug` – simple HTML listing (log level = `debug`)
 
-Each `.yaml`/`.yml` file can contain either a top-level list or a `contacts:` object:
+Point Grandstream phones at `http://HOST:PORT/<base-path>/` and they will fetch `<base-path>/phonebook.xml`.
 
-```yaml
-- first_name: John
-  last_name: Doe
-  phone: "8000"
-  account_index: 1
-  group_id: 0
+## Development
 
-contacts:
-  - first_name: Lily
-    last_name: Lee
-    phone: "+1 555 0101"
-    account_index: 2
-    group_id: 2
-```
-
-Validation rules:
-- At least one of `first_name` / `last_name`.
-- `phone` must be non-empty and only contain digits plus `+`, `*`, `#`, `,`. Spaces are stripped before emitting XML.
-- `account_index` ∈ `[1,6]`.
-- `group_id` optional, ∈ `[0,9]`.
-
-### Examples & Tests
-
-Sample data lives under `examples/` with a generated `expected_phonebook.xml`. Run the full suite (unit + integration) with:
+- Sample repo lives in [`examples/`](examples/) and includes generated `expected_phonebook.xml`.
+- Goldens for renderers sit under `testdata/`.
+- Run the full suite (unit + integration + goldens) with:
 
 ```bash
 go test ./...

@@ -7,6 +7,10 @@
       <phonenumber>8000</phonenumber>
       <accountindex>1</accountindex>
     </Phone>
+    <Phone>
+      <phonenumber>8100</phonenumber>
+      <accountindex>2</accountindex>
+    </Phone>
     <Groups>
       <groupid>0</groupid>
     </Groups>

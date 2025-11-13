@@ -15,8 +15,16 @@ func TestPhonebookHandlerETagAndCaching(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	srv := NewServer(Config{Addr: ":0", BasePath: "/xml/", AllowDebug: true}, logger)
 
-	contact := model.Contact{FirstName: "John", LastName: "Doe", Phone: "8000", AccountIndex: 1}
-	xml := []byte("<?xml version=\"1.0\"?><AddressBook></AddressBook>")
+	contact := model.Contact{
+		FirstName: "John",
+		LastName:  "Doe",
+		Extension: "8000",
+		Phones: []model.Phone{
+			{Number: "8000", AccountIndex: 1},
+		},
+		Endpoint: model.ContactEndpoint{Template: "endpoint-template"},
+	}
+	xml := []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?><AddressBook></AddressBook>")
 	lastMod := time.Unix(1700000000, 0).UTC()
 	srv.Update([]model.Contact{contact}, xml, lastMod)
 

@@ -1,0 +1,17 @@
+contacts:
+  - id: "scott"
+    first_name: "Scott"
+    last_name: "Nichols"
+    ext: "101"
+    password: "secret101"
+    account_index: 1
+    group_id: 2
+  - id: "lily"
+    first_name: "Lily"
+    last_name: "Lee"
+    ext: "102"
+    password: "secret102"
+    phones:
+      - number: "6000"
+        account_index: 2
+    group_id: 1

@@ -181,7 +181,16 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, "<html><body><h1>Contacts (v%[1]d)</h1><ul>", version)
 	for _, c := range snap.Contacts {
-		fmt.Fprintf(w, "<li>%s %s (%s) [%d] &mdash; %s</li>", escapeHTML(c.FirstName), escapeHTML(c.LastName), escapeHTML(c.Phone), c.AccountIndex, escapeHTML(c.SourcePath))
+		phone := ""
+		if len(c.Phones) > 0 {
+			phone = c.Phones[0].Number
+		}
+		fmt.Fprintf(w, "<li>%s %s &ndash; ext %s (%s) &mdash; %s</li>",
+			escapeHTML(c.FirstName),
+			escapeHTML(c.LastName),
+			escapeHTML(c.Extension),
+			escapeHTML(phone),
+			escapeHTML(c.SourcePath))
 	}
 	fmt.Fprintf(w, "</ul></body></html>")
 }

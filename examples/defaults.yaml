@@ -1,0 +1,10 @@
+aor:
+  max_contacts: 1
+  remove_existing: true
+  qualify_frequency: 30
+
+auth:
+  username_equals_ext: true
+
+endpoint:
+  template: "endpoint-template"

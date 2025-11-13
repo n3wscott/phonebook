@@ -1,0 +1,17 @@
+contacts:
+  - id: "amir"
+    first_name: "Amir"
+    last_name: "Khan"
+    ext: "201"
+    password: "secret201"
+    group_id: 0
+    phones:
+      - number: "+1 555 0101"
+        account_index: 1
+  - id: "zoe"
+    first_name: "Zoe"
+    last_name: "Yu"
+    ext: "202"
+    password: "secret202"
+    account_index: 3
+    group_id: 1
