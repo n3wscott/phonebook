@@ -35,8 +35,7 @@ func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 	}
 
 	for _, tmpl := range cfg.EndpointTemplates {
-		name := fmt.Sprintf("%s(!)", tmpl.Name)
-		writeSection(&b, name, func() {
+		writeTemplateSection(&b, tmpl.Name, func() {
 			writeKV(&b, "type", "endpoint")
 			writeMap(&b, tmpl.Extra)
 		})
@@ -88,6 +87,14 @@ func writeSection(b *strings.Builder, name string, fn func()) {
 		b.WriteByte('\n')
 	}
 	fmt.Fprintf(b, "[%s]\n", name)
+	fn()
+}
+
+func writeTemplateSection(b *strings.Builder, name string, fn func()) {
+	if b.Len() > 0 {
+		b.WriteByte('\n')
+	}
+	fmt.Fprintf(b, "[%s](!)\n", name)
 	fn()
 }
 

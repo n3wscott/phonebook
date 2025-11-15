@@ -155,6 +155,9 @@ func (c *Config) normalize() {
 		if c.EndpointTemplates[i].Extra == nil {
 			c.EndpointTemplates[i].Extra = map[string]any{}
 		}
+		if _, ok := c.EndpointTemplates[i].Extra["allow"]; !ok {
+			c.EndpointTemplates[i].Extra["allow"] = defaultAllowCodecs()
+		}
 	}
 	if c.Server.Addr == "" {
 		c.Server.Addr = ":8080"
@@ -163,6 +166,10 @@ func (c *Config) normalize() {
 	if c.Dialplan.Context == "" {
 		c.Dialplan.Context = "internal"
 	}
+}
+
+func defaultAllowCodecs() []string {
+	return []string{"ulaw", "opus", "g722"}
 }
 
 func sanitizeBasePath(p string) string {
