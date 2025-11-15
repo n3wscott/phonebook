@@ -44,7 +44,7 @@ func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 
 	for _, c := range contacts {
 		fmt.Fprintf(&b, "\n; Auth & AOR for extension %s\n", c.Extension)
-		writeSection(&b, fmt.Sprintf("%s(%s)", c.Extension, c.Endpoint.Template), func() {
+		writeInheritedSection(&b, c.Extension, c.Endpoint.Template, func() {
 			writeKV(&b, "type", "endpoint")
 			writeKV(&b, "auth", c.Extension)
 			writeKV(&b, "aors", c.Extension)
@@ -88,6 +88,14 @@ func writeSection(b *strings.Builder, name string, fn func()) {
 		b.WriteByte('\n')
 	}
 	fmt.Fprintf(b, "[%s]\n", name)
+	fn()
+}
+
+func writeInheritedSection(b *strings.Builder, name, template string, fn func()) {
+	if b.Len() > 0 {
+		b.WriteByte('\n')
+	}
+	fmt.Fprintf(b, "[%s](%s)\n", name, template)
 	fn()
 }
 
