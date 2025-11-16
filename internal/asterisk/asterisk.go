@@ -17,6 +17,9 @@ func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 	writeSection(&b, "global", func() {
 		writeKV(&b, "type", "global")
 		writeOptions(&b, cfg.Global)
+		if _, ok := cfg.Global["endpoint_identifier_order"]; !ok {
+			writeKV(&b, "endpoint_identifier_order", "username,ip,anonymous")
+		}
 	})
 
 	for _, transport := range cfg.Transports {
@@ -37,7 +40,7 @@ func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 	for _, tmpl := range cfg.EndpointTemplates {
 		writeTemplateSection(&b, tmpl.Name, func() {
 			writeKV(&b, "type", "endpoint")
-			writeMap(&b, tmpl.Extra)
+			writeEndpointOptions(&b, tmpl.Extra)
 		})
 	}
 
@@ -96,6 +99,25 @@ func writeTemplateSection(b *strings.Builder, name string, fn func()) {
 	}
 	fmt.Fprintf(b, "[%s](!)\n", name)
 	fn()
+}
+
+func writeEndpointOptions(b *strings.Builder, m map[string]any) {
+	if len(m) == 0 {
+		return
+	}
+	// Ensure disallow is written before allow entries.
+	if val, ok := m["disallow"]; ok {
+		writeKV(b, "disallow", val)
+	}
+	if val, ok := m["allow"]; ok {
+		writeKV(b, "allow", val)
+	}
+	for key, val := range m {
+		if key == "allow" || key == "disallow" {
+			continue
+		}
+		writeKV(b, key, val)
+	}
 }
 
 func writeInheritedSection(b *strings.Builder, name, template string, fn func()) {
