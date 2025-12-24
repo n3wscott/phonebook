@@ -20,12 +20,13 @@ type FileMeta struct {
 
 // Config represents config.yaml.
 type Config struct {
-	Global            map[string]any   `yaml:"global"`
-	Network           Network          `yaml:"network"`
-	Transports        []Transport      `yaml:"transports"`
-	EndpointTemplates []EndpointConfig `yaml:"endpoint_templates"`
-	Dialplan          Dialplan         `yaml:"dialplan"`
-	Server            Server           `yaml:"server"`
+    Global            map[string]any   `yaml:"global"`
+    Network           Network          `yaml:"network"`
+    Transports        []Transport      `yaml:"transports"`
+    EndpointTemplates []EndpointConfig `yaml:"endpoint_templates"`
+    Dialplan          Dialplan         `yaml:"dialplan"`
+    Server            Server           `yaml:"server"`
+    Asterisk          Asterisk         `yaml:"asterisk"`
 }
 
 // Network aggregates transport-related addresses.
@@ -57,8 +58,19 @@ type Dialplan struct {
 
 // Server config section.
 type Server struct {
-	Addr     string `yaml:"addr"`
-	BasePath string `yaml:"base_path"`
+    Addr     string `yaml:"addr"`
+    BasePath string `yaml:"base_path"`
+}
+
+// Asterisk-specific options for generators.
+type Asterisk struct {
+    StaticContacts []StaticContact `yaml:"static_contacts"`
+}
+
+// StaticContact binds an extension to an explicit AOR contact URI.
+type StaticContact struct {
+    Ext     string `yaml:"ext"`
+    Contact string `yaml:"contact"`
 }
 
 // Defaults defines repo-wide per-contact defaults.

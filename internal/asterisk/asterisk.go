@@ -12,7 +12,17 @@ import (
 
 // RenderPJSIP builds pjsip.conf contents.
 func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
-	var b strings.Builder
+    var b strings.Builder
+
+    // Build a lookup for static AOR contacts, keyed by extension.
+    staticContactByExt := map[string]string{}
+    if len(cfg.Asterisk.StaticContacts) > 0 {
+        for _, sc := range cfg.Asterisk.StaticContacts {
+            if sc.Ext != "" && sc.Contact != "" {
+                staticContactByExt[sc.Ext] = sc.Contact
+            }
+        }
+    }
 
 	writeSection(&b, "global", func() {
 		writeKV(&b, "type", "global")
@@ -57,13 +67,16 @@ func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 			writeKV(&b, "username", c.Auth.Username)
 			writeKV(&b, "password", c.Auth.Password)
 		})
-		writeSection(&b, c.Extension, func() {
-			writeKV(&b, "type", "aor")
-			writeKV(&b, "max_contacts", c.AOR.MaxContacts)
-			writeKV(&b, "remove_existing", c.AOR.RemoveExisting)
-			writeKV(&b, "qualify_frequency", c.AOR.QualifyFrequency)
-		})
-	}
+        writeSection(&b, c.Extension, func() {
+            writeKV(&b, "type", "aor")
+            writeKV(&b, "max_contacts", c.AOR.MaxContacts)
+            writeKV(&b, "remove_existing", c.AOR.RemoveExisting)
+            writeKV(&b, "qualify_frequency", c.AOR.QualifyFrequency)
+            if uri, ok := staticContactByExt[c.Extension]; ok {
+                writeKV(&b, "contact", uri)
+            }
+        })
+    }
 
 	b.WriteByte('\n')
 	return []byte(b.String()), nil
