@@ -65,12 +65,23 @@ type Server struct {
 // Asterisk-specific options for generators.
 type Asterisk struct {
     StaticContacts []StaticContact `yaml:"static_contacts"`
+    EdgeIn         EdgeIn          `yaml:"edge_in"`
 }
 
 // StaticContact binds an extension to an explicit AOR contact URI.
 type StaticContact struct {
     Ext     string `yaml:"ext"`
     Contact string `yaml:"contact"`
+}
+
+// EdgeIn defines a trusted inbound edge endpoint and identify rule.
+type EdgeIn struct {
+    // Name of the endpoint section to create (default: "edge-in").
+    Name string `yaml:"name"`
+    // Single IP or CIDR (or hostname) to match in an identify section.
+    Match string `yaml:"match"`
+    // Context to use for inbound calls (default: cfg.Dialplan.Context or "internal").
+    Context string `yaml:"context"`
 }
 
 // Defaults defines repo-wide per-contact defaults.

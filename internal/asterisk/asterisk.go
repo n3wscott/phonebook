@@ -47,12 +47,54 @@ func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 		})
 	}
 
-	for _, tmpl := range cfg.EndpointTemplates {
-		writeTemplateSection(&b, tmpl.Name, func() {
-			writeKV(&b, "type", "endpoint")
-			writeEndpointOptions(&b, tmpl.Extra)
-		})
-	}
+    for _, tmpl := range cfg.EndpointTemplates {
+        writeTemplateSection(&b, tmpl.Name, func() {
+            writeKV(&b, "type", "endpoint")
+            writeEndpointOptions(&b, tmpl.Extra)
+        })
+    }
+
+    // Optional trusted inbound edge endpoint (no auth) identified by source IP.
+    if cfg.Asterisk.EdgeIn.Match != "" {
+        name := cfg.Asterisk.EdgeIn.Name
+        if name == "" {
+            name = "edge-in"
+        }
+        inboundCtx := cfg.Asterisk.EdgeIn.Context
+        if inboundCtx == "" {
+            inboundCtx = cfg.Dialplan.Context
+            if inboundCtx == "" {
+                inboundCtx = "internal"
+            }
+        }
+        // Render a minimal endpoint suitable for edge proxy ingress.
+        writeSection(&b, name, func() {
+            writeKV(&b, "type", "endpoint")
+            // Security model: no auth; identify by IP below.
+            writeKV(&b, "context", inboundCtx)
+            writeKV(&b, "disallow", "all")
+            // Allow codecs: reuse first endpoint template allow if available; else default.
+            allowed := defaultAllowFromTemplates(cfg)
+            for _, c := range allowed {
+                writeKV(&b, "allow", c)
+            }
+            // NAT-friendly defaults matching templates
+            writeKV(&b, "direct_media", "no")
+            writeKV(&b, "rtp_symmetric", "yes")
+            writeKV(&b, "force_rport", "yes")
+            writeKV(&b, "rewrite_contact", "yes")
+            // Use first transport name if defined
+            if len(cfg.Transports) > 0 {
+                writeKV(&b, "transport", cfg.Transports[0].Name)
+            }
+        })
+        // Identify mapping for the edge source IP/host to the endpoint.
+        writeSection(&b, name, func() {
+            writeKV(&b, "type", "identify")
+            writeKV(&b, "endpoint", name)
+            writeKV(&b, "match", cfg.Asterisk.EdgeIn.Match)
+        })
+    }
 
 	for _, c := range contacts {
 		fmt.Fprintf(&b, "\n; Auth & AOR for extension %s\n", c.Extension)
@@ -80,6 +122,17 @@ func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 
 	b.WriteByte('\n')
 	return []byte(b.String()), nil
+}
+
+// defaultAllowFromTemplates returns the allow list from the first endpoint template,
+// or a safe fallback.
+func defaultAllowFromTemplates(cfg config.Config) []string {
+    if len(cfg.EndpointTemplates) > 0 {
+        if v, ok := cfg.EndpointTemplates[0].Extra["allow"]; ok {
+            return flatten(v)
+        }
+    }
+    return []string{"ulaw", "alaw", "g722"}
 }
 
 // RenderExtensions builds extensions.conf.
