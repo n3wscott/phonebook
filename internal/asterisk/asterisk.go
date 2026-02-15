@@ -12,17 +12,17 @@ import (
 
 // RenderPJSIP builds pjsip.conf contents.
 func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
-    var b strings.Builder
+	var b strings.Builder
 
-    // Build a lookup for static AOR contacts, keyed by extension.
-    staticContactByExt := map[string]string{}
-    if len(cfg.Asterisk.StaticContacts) > 0 {
-        for _, sc := range cfg.Asterisk.StaticContacts {
-            if sc.Ext != "" && sc.Contact != "" {
-                staticContactByExt[sc.Ext] = sc.Contact
-            }
-        }
-    }
+	// Build a lookup for static AOR contacts, keyed by extension.
+	staticContactByExt := map[string]string{}
+	if len(cfg.Asterisk.StaticContacts) > 0 {
+		for _, sc := range cfg.Asterisk.StaticContacts {
+			if sc.Ext != "" && sc.Contact != "" {
+				staticContactByExt[sc.Ext] = sc.Contact
+			}
+		}
+	}
 
 	writeSection(&b, "global", func() {
 		writeKV(&b, "type", "global")
@@ -47,54 +47,54 @@ func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 		})
 	}
 
-    for _, tmpl := range cfg.EndpointTemplates {
-        writeTemplateSection(&b, tmpl.Name, func() {
-            writeKV(&b, "type", "endpoint")
-            writeEndpointOptions(&b, tmpl.Extra)
-        })
-    }
+	for _, tmpl := range cfg.EndpointTemplates {
+		writeTemplateSection(&b, tmpl.Name, func() {
+			writeKV(&b, "type", "endpoint")
+			writeEndpointOptions(&b, tmpl.Extra)
+		})
+	}
 
-    // Optional trusted inbound edge endpoint (no auth) identified by source IP.
-    if cfg.Asterisk.EdgeIn.Match != "" {
-        name := cfg.Asterisk.EdgeIn.Name
-        if name == "" {
-            name = "edge-in"
-        }
-        inboundCtx := cfg.Asterisk.EdgeIn.Context
-        if inboundCtx == "" {
-            inboundCtx = cfg.Dialplan.Context
-            if inboundCtx == "" {
-                inboundCtx = "internal"
-            }
-        }
-        // Render a minimal endpoint suitable for edge proxy ingress.
-        writeSection(&b, name, func() {
-            writeKV(&b, "type", "endpoint")
-            // Security model: no auth; identify by IP below.
-            writeKV(&b, "context", inboundCtx)
-            writeKV(&b, "disallow", "all")
-            // Allow codecs: reuse first endpoint template allow if available; else default.
-            allowed := defaultAllowFromTemplates(cfg)
-            for _, c := range allowed {
-                writeKV(&b, "allow", c)
-            }
-            // NAT-friendly defaults matching templates
-            writeKV(&b, "direct_media", "no")
-            writeKV(&b, "rtp_symmetric", "yes")
-            writeKV(&b, "force_rport", "yes")
-            writeKV(&b, "rewrite_contact", "yes")
-            // Use first transport name if defined
-            if len(cfg.Transports) > 0 {
-                writeKV(&b, "transport", cfg.Transports[0].Name)
-            }
-        })
-        // Identify mapping for the edge source IP/host to the endpoint.
-        writeSection(&b, name, func() {
-            writeKV(&b, "type", "identify")
-            writeKV(&b, "endpoint", name)
-            writeKV(&b, "match", cfg.Asterisk.EdgeIn.Match)
-        })
-    }
+	// Optional trusted inbound edge endpoint (no auth) identified by source IP.
+	if cfg.Asterisk.EdgeIn.Match != "" {
+		name := cfg.Asterisk.EdgeIn.Name
+		if name == "" {
+			name = "edge-in"
+		}
+		inboundCtx := cfg.Asterisk.EdgeIn.Context
+		if inboundCtx == "" {
+			inboundCtx = cfg.Dialplan.Context
+			if inboundCtx == "" {
+				inboundCtx = "internal"
+			}
+		}
+		// Render a minimal endpoint suitable for edge proxy ingress.
+		writeSection(&b, name, func() {
+			writeKV(&b, "type", "endpoint")
+			// Security model: no auth; identify by IP below.
+			writeKV(&b, "context", inboundCtx)
+			writeKV(&b, "disallow", "all")
+			// Allow codecs: reuse first endpoint template allow if available; else default.
+			allowed := defaultAllowFromTemplates(cfg)
+			for _, c := range allowed {
+				writeKV(&b, "allow", c)
+			}
+			// NAT-friendly defaults matching templates
+			writeKV(&b, "direct_media", "no")
+			writeKV(&b, "rtp_symmetric", "yes")
+			writeKV(&b, "force_rport", "yes")
+			writeKV(&b, "rewrite_contact", "yes")
+			// Use first transport name if defined
+			if len(cfg.Transports) > 0 {
+				writeKV(&b, "transport", cfg.Transports[0].Name)
+			}
+		})
+		// Identify mapping for the edge source IP/host to the endpoint.
+		writeSection(&b, name, func() {
+			writeKV(&b, "type", "identify")
+			writeKV(&b, "endpoint", name)
+			writeKV(&b, "match", cfg.Asterisk.EdgeIn.Match)
+		})
+	}
 
 	for _, c := range contacts {
 		fmt.Fprintf(&b, "\n; Auth & AOR for extension %s\n", c.Extension)
@@ -109,16 +109,16 @@ func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 			writeKV(&b, "username", c.Auth.Username)
 			writeKV(&b, "password", c.Auth.Password)
 		})
-        writeSection(&b, c.Extension, func() {
-            writeKV(&b, "type", "aor")
-            writeKV(&b, "max_contacts", c.AOR.MaxContacts)
-            writeKV(&b, "remove_existing", c.AOR.RemoveExisting)
-            writeKV(&b, "qualify_frequency", c.AOR.QualifyFrequency)
-            if uri, ok := staticContactByExt[c.Extension]; ok {
-                writeKV(&b, "contact", uri)
-            }
-        })
-    }
+		writeSection(&b, c.Extension, func() {
+			writeKV(&b, "type", "aor")
+			writeKV(&b, "max_contacts", c.AOR.MaxContacts)
+			writeKV(&b, "remove_existing", c.AOR.RemoveExisting)
+			writeKV(&b, "qualify_frequency", c.AOR.QualifyFrequency)
+			if uri, ok := staticContactByExt[c.Extension]; ok {
+				writeKV(&b, "contact", uri)
+			}
+		})
+	}
 
 	b.WriteByte('\n')
 	return []byte(b.String()), nil
@@ -127,28 +127,119 @@ func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 // defaultAllowFromTemplates returns the allow list from the first endpoint template,
 // or a safe fallback.
 func defaultAllowFromTemplates(cfg config.Config) []string {
-    if len(cfg.EndpointTemplates) > 0 {
-        if v, ok := cfg.EndpointTemplates[0].Extra["allow"]; ok {
-            return flatten(v)
-        }
-    }
-    return []string{"ulaw", "alaw", "g722"}
+	if len(cfg.EndpointTemplates) > 0 {
+		if v, ok := cfg.EndpointTemplates[0].Extra["allow"]; ok {
+			return flatten(v)
+		}
+	}
+	return []string{"ulaw", "alaw", "g722"}
 }
 
 // RenderExtensions builds extensions.conf.
 func RenderExtensions(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 	var b strings.Builder
-	context := cfg.Dialplan.Context
-	if context == "" {
-		context = "internal"
+	mainContext := cfg.Dialplan.Context
+	if mainContext == "" {
+		mainContext = "internal"
 	}
-	writeSection(&b, context, func() {
+
+	conferenceByContext := map[string][]config.Conference{}
+	conferenceContextOrder := []string{}
+	seenConferenceContext := map[string]struct{}{}
+	for _, conference := range cfg.Dialplan.Conferences {
+		ctx := conference.Context
+		if ctx == "" {
+			ctx = "conferences"
+		}
+		if conference.Room == "" {
+			conference.Room = conference.Extension
+		}
+		conference.Context = ctx
+		if _, ok := seenConferenceContext[ctx]; !ok {
+			seenConferenceContext[ctx] = struct{}{}
+			conferenceContextOrder = append(conferenceContextOrder, ctx)
+		}
+		conferenceByContext[ctx] = append(conferenceByContext[ctx], conference)
+	}
+
+	messageContext := cfg.Dialplan.Messages.Context
+	if messageContext == "" {
+		messageContext = "messages"
+	}
+	messagePattern := cfg.Dialplan.Messages.Pattern
+	if messagePattern == "" {
+		messagePattern = "_X."
+	}
+
+	includes := []string{}
+	seenIncludes := map[string]struct{}{}
+	addInclude := func(name string) {
+		if name == "" || name == mainContext {
+			return
+		}
+		if _, ok := seenIncludes[name]; ok {
+			return
+		}
+		seenIncludes[name] = struct{}{}
+		includes = append(includes, name)
+	}
+
+	for _, include := range cfg.Dialplan.Includes {
+		addInclude(include)
+	}
+	for _, context := range conferenceContextOrder {
+		addInclude(context)
+	}
+	if cfg.Dialplan.Messages.Enabled {
+		addInclude(messageContext)
+	}
+
+	writeSection(&b, mainContext, func() {
+		for _, include := range includes {
+			fmt.Fprintf(&b, "include => %s\n", include)
+		}
 		for _, c := range contacts {
 			fmt.Fprintf(&b, "exten => %s,1,Dial(PJSIP/%s)\n", c.Extension, c.Extension)
 		}
+		for _, conference := range conferenceByContext[mainContext] {
+			writeConferenceExtension(&b, conference)
+		}
+		if cfg.Dialplan.Messages.Enabled && messageContext == mainContext {
+			writeMessageRouting(&b, messagePattern)
+		}
 	})
+
+	for _, context := range conferenceContextOrder {
+		if context == mainContext {
+			continue
+		}
+		writeSection(&b, context, func() {
+			for _, conference := range conferenceByContext[context] {
+				writeConferenceExtension(&b, conference)
+			}
+		})
+	}
+
+	if cfg.Dialplan.Messages.Enabled && messageContext != mainContext {
+		writeSection(&b, messageContext, func() {
+			writeMessageRouting(&b, messagePattern)
+		})
+	}
+
 	b.WriteByte('\n')
 	return []byte(b.String()), nil
+}
+
+func writeConferenceExtension(b *strings.Builder, conference config.Conference) {
+	fmt.Fprintf(b, "exten => %s,1,Answer()\n", conference.Extension)
+	fmt.Fprintf(b, " same => n,ConfBridge(%s)\n", conference.Room)
+	fmt.Fprintln(b, " same => n,Hangup()")
+}
+
+func writeMessageRouting(b *strings.Builder, pattern string) {
+	fmt.Fprintf(b, "exten => %s,1,NoOp(Incoming SIP MESSAGE)\n", pattern)
+	fmt.Fprintln(b, " same => n,MessageSend(pjsip:${EXTEN},${MESSAGE(from)})")
+	fmt.Fprintln(b, " same => n,Hangup()")
 }
 
 func writeSection(b *strings.Builder, name string, fn func()) {

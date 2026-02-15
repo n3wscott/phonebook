@@ -35,6 +35,40 @@ func TestRenderExtensionsMatchesGolden(t *testing.T) {
 	}
 }
 
+func TestRenderExtensionsWithConferencesAndMessages(t *testing.T) {
+	cfg := sampleConfig()
+	cfg.Dialplan.Includes = []string{"legacy"}
+	cfg.Dialplan.Conferences = []config.Conference{{Extension: "2600", Room: "2600", Context: "conferences"}}
+	cfg.Dialplan.Messages = config.Messages{Enabled: true, Context: "messages", Pattern: "_X."}
+
+	got, err := RenderExtensions(cfg, sampleContacts())
+	if err != nil {
+		t.Fatalf("RenderExtensions() error = %v", err)
+	}
+
+	want := `[internal]
+include => legacy
+include => conferences
+include => messages
+exten => 101,1,Dial(PJSIP/101)
+exten => 102,1,Dial(PJSIP/102)
+
+[conferences]
+exten => 2600,1,Answer()
+ same => n,ConfBridge(2600)
+ same => n,Hangup()
+
+[messages]
+exten => _X.,1,NoOp(Incoming SIP MESSAGE)
+ same => n,MessageSend(pjsip:${EXTEN},${MESSAGE(from)})
+ same => n,Hangup()
+
+`
+	if string(got) != want {
+		t.Fatalf("extensions.conf mismatch\nGot:\n%s\nWant:\n%s", got, want)
+	}
+}
+
 func sampleConfig() config.Config {
 	return config.Config{
 		Global: map[string]any{"user_agent": "Asterisk"},

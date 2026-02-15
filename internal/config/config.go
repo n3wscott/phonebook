@@ -20,13 +20,13 @@ type FileMeta struct {
 
 // Config represents config.yaml.
 type Config struct {
-    Global            map[string]any   `yaml:"global"`
-    Network           Network          `yaml:"network"`
-    Transports        []Transport      `yaml:"transports"`
-    EndpointTemplates []EndpointConfig `yaml:"endpoint_templates"`
-    Dialplan          Dialplan         `yaml:"dialplan"`
-    Server            Server           `yaml:"server"`
-    Asterisk          Asterisk         `yaml:"asterisk"`
+	Global            map[string]any   `yaml:"global"`
+	Network           Network          `yaml:"network"`
+	Transports        []Transport      `yaml:"transports"`
+	EndpointTemplates []EndpointConfig `yaml:"endpoint_templates"`
+	Dialplan          Dialplan         `yaml:"dialplan"`
+	Server            Server           `yaml:"server"`
+	Asterisk          Asterisk         `yaml:"asterisk"`
 }
 
 // Network aggregates transport-related addresses.
@@ -53,35 +53,52 @@ type EndpointConfig struct {
 
 // Dialplan config.
 type Dialplan struct {
+	Context     string       `yaml:"context"`
+	Includes    []string     `yaml:"includes"`
+	Conferences []Conference `yaml:"conferences"`
+	Messages    Messages     `yaml:"messages"`
+}
+
+// Conference defines a conference bridge extension.
+type Conference struct {
+	Extension string `yaml:"extension"`
+	Room      string `yaml:"room"`
+	Context   string `yaml:"context"`
+}
+
+// Messages configures SIP MESSAGE routing context.
+type Messages struct {
+	Enabled bool   `yaml:"enabled"`
 	Context string `yaml:"context"`
+	Pattern string `yaml:"pattern"`
 }
 
 // Server config section.
 type Server struct {
-    Addr     string `yaml:"addr"`
-    BasePath string `yaml:"base_path"`
+	Addr     string `yaml:"addr"`
+	BasePath string `yaml:"base_path"`
 }
 
 // Asterisk-specific options for generators.
 type Asterisk struct {
-    StaticContacts []StaticContact `yaml:"static_contacts"`
-    EdgeIn         EdgeIn          `yaml:"edge_in"`
+	StaticContacts []StaticContact `yaml:"static_contacts"`
+	EdgeIn         EdgeIn          `yaml:"edge_in"`
 }
 
 // StaticContact binds an extension to an explicit AOR contact URI.
 type StaticContact struct {
-    Ext     string `yaml:"ext"`
-    Contact string `yaml:"contact"`
+	Ext     string `yaml:"ext"`
+	Contact string `yaml:"contact"`
 }
 
 // EdgeIn defines a trusted inbound edge endpoint and identify rule.
 type EdgeIn struct {
-    // Name of the endpoint section to create (default: "edge-in").
-    Name string `yaml:"name"`
-    // Single IP or CIDR (or hostname) to match in an identify section.
-    Match string `yaml:"match"`
-    // Context to use for inbound calls (default: cfg.Dialplan.Context or "internal").
-    Context string `yaml:"context"`
+	// Name of the endpoint section to create (default: "edge-in").
+	Name string `yaml:"name"`
+	// Single IP or CIDR (or hostname) to match in an identify section.
+	Match string `yaml:"match"`
+	// Context to use for inbound calls (default: cfg.Dialplan.Context or "internal").
+	Context string `yaml:"context"`
 }
 
 // Defaults defines repo-wide per-contact defaults.
@@ -189,6 +206,20 @@ func (c *Config) normalize() {
 	if c.Dialplan.Context == "" {
 		c.Dialplan.Context = "internal"
 	}
+	if c.Dialplan.Messages.Context == "" {
+		c.Dialplan.Messages.Context = "messages"
+	}
+	if c.Dialplan.Messages.Pattern == "" {
+		c.Dialplan.Messages.Pattern = "_X."
+	}
+	for i := range c.Dialplan.Conferences {
+		if c.Dialplan.Conferences[i].Context == "" {
+			c.Dialplan.Conferences[i].Context = "conferences"
+		}
+		if c.Dialplan.Conferences[i].Room == "" {
+			c.Dialplan.Conferences[i].Room = c.Dialplan.Conferences[i].Extension
+		}
+	}
 }
 
 func defaultAllowCodecs() []string {
@@ -284,6 +315,11 @@ func validate(cfg Config, defs Defaults) error {
 	}
 	if _, ok := names[defs.Endpoint.Template]; !ok {
 		return fmt.Errorf("endpoint template %q referenced by defaults not found in config.yaml", defs.Endpoint.Template)
+	}
+	for _, conf := range cfg.Dialplan.Conferences {
+		if conf.Extension == "" {
+			return errors.New("dialplan conference extension is required")
+		}
 	}
 	return nil
 }

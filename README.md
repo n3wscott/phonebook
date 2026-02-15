@@ -12,7 +12,7 @@ Grandstream phonebook server + Asterisk config generator backed by a single YAML
     **/*.yaml
 ```
 
-`config.yaml` defines `[global]`, transports, endpoint templates, and dialplan context used when rendering `pjsip.conf`/`extensions.conf`. `defaults.yaml` provides repo-wide fallback values (see [examples](examples/)).
+`config.yaml` defines `[global]`, transports, endpoint templates, and dialplan behavior used when rendering `pjsip.conf`/`extensions.conf` (including optional `dialplan.includes`, `dialplan.conferences`, and `dialplan.messages`). `defaults.yaml` provides repo-wide fallback values (see [examples](examples/)).
 
 Each contact entry contains PBX credentials + XML fields:
 

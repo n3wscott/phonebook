@@ -30,6 +30,14 @@ endpoint_templates:
 
 dialplan:
   context: "internal"
+  conferences:
+    - extension: "2600"
+      room: "2600"
+      context: "conferences"
+  messages:
+    enabled: true
+    context: "messages"
+    pattern: "_X."
 
 server:
   addr: ":8080"
