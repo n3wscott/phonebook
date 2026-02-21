@@ -248,34 +248,6 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 			Known:   current.Known,
 		}
 	}
-	for _, call := range callSnapshot.Active {
-		for _, rawID := range []string{call.From, call.To} {
-			id := canonicalParty(rawID)
-			if id == "" {
-				continue
-			}
-			targetID := id
-			if mappedID, ok := aliasToID[id]; ok {
-				targetID = mappedID
-			}
-			state := "in-use"
-			current, ok := contactByID[targetID]
-			if !ok || current.State != "in-use" {
-				name := current.Name
-				if name == "" {
-					name = resolveName(nameLookup, targetID)
-				}
-				contactByID[targetID] = dashboardContact{
-					ID:      targetID,
-					Name:    name,
-					State:   state,
-					Detail:  call.State,
-					Updated: call.Updated,
-					Known:   current.Known,
-				}
-			}
-		}
-	}
 	contacts := make([]dashboardContact, 0, len(contactByID))
 	for _, c := range contactByID {
 		contacts = append(contacts, c)

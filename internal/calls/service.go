@@ -299,6 +299,12 @@ func (s *Service) runAMIConnection(ctx context.Context, cfg AMIConfig) error {
 		return err
 	}
 	defer conn.Close()
+	var writeMu sync.Mutex
+	sendShowEndpoints := func() error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return writeAMIPJSIPShowEndpoints(conn)
+	}
 
 	reader := bufio.NewReader(conn)
 	if _, err := reader.ReadString('\n'); err != nil {
@@ -310,7 +316,7 @@ func (s *Service) runAMIConnection(ctx context.Context, cfg AMIConfig) error {
 	if err := waitAMILogin(reader); err != nil {
 		return err
 	}
-	if err := writeAMIPJSIPShowEndpoints(conn); err != nil {
+	if err := sendShowEndpoints(); err != nil {
 		return err
 	}
 	s.logger.Info("AMI connected", "addr", cfg.Addr)
@@ -324,6 +330,24 @@ func (s *Service) runAMIConnection(ctx context.Context, cfg AMIConfig) error {
 		}
 	}()
 	defer close(closeConn)
+
+	refreshTicker := time.NewTicker(15 * time.Second)
+	defer refreshTicker.Stop()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-closeConn:
+				return
+			case <-refreshTicker.C:
+				if err := sendShowEndpoints(); err != nil {
+					_ = conn.Close()
+					return
+				}
+			}
+		}
+	}()
 
 	for {
 		msg, err := readAMIMessage(reader)
