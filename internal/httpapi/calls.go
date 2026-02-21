@@ -41,6 +41,7 @@ type dashboardContact struct {
 	State   string    `json:"state"`
 	Detail  string    `json:"detail,omitempty"`
 	Updated time.Time `json:"updated,omitempty"`
+	Known   bool      `json:"known"`
 }
 
 func (s *Server) handleCallsPage(w http.ResponseWriter, _ *http.Request) {
@@ -183,17 +184,68 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 	}
 
 	contactByID := make(map[string]dashboardContact)
+	aliasToID := make(map[string]string)
+	for _, contact := range phonebookSnapshot.Contacts {
+		id := canonicalParty(contact.Extension)
+		if id == "" {
+			for _, phone := range contact.Phones {
+				id = canonicalParty(phone.Number)
+				if id != "" {
+					break
+				}
+			}
+		}
+		if id == "" {
+			continue
+		}
+		name := strings.TrimSpace(contact.FirstName + " " + contact.LastName)
+		if name == "" {
+			name = resolveName(nameLookup, id)
+		}
+		if name == "" {
+			name = id
+		}
+		if _, exists := contactByID[id]; !exists {
+			contactByID[id] = dashboardContact{
+				ID:     id,
+				Name:   name,
+				State:  "unknown",
+				Detail: "not seen in AMI yet",
+				Known:  true,
+			}
+		}
+		aliasToID[id] = id
+		if extAlias := canonicalParty(contact.Extension); extAlias != "" {
+			aliasToID[extAlias] = id
+		}
+		for _, phone := range contact.Phones {
+			if phoneAlias := canonicalParty(phone.Number); phoneAlias != "" {
+				aliasToID[phoneAlias] = id
+			}
+		}
+	}
+
 	for _, p := range callSnapshot.Presences {
 		id := canonicalParty(p.ID)
 		if id == "" {
 			continue
 		}
-		contactByID[id] = dashboardContact{
-			ID:      id,
-			Name:    resolveName(nameLookup, id),
+		targetID := id
+		if mappedID, ok := aliasToID[id]; ok {
+			targetID = mappedID
+		}
+		current := contactByID[targetID]
+		name := current.Name
+		if name == "" {
+			name = resolveName(nameLookup, targetID)
+		}
+		contactByID[targetID] = dashboardContact{
+			ID:      targetID,
+			Name:    name,
 			State:   p.State,
 			Detail:  p.Detail,
 			Updated: p.Updated,
+			Known:   current.Known,
 		}
 	}
 	for _, call := range callSnapshot.Active {
@@ -202,18 +254,27 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 			if id == "" {
 				continue
 			}
+			targetID := id
+			if mappedID, ok := aliasToID[id]; ok {
+				targetID = mappedID
+			}
 			state := "in-call"
 			if call.State == "ringing" || call.State == "dialing" {
 				state = call.State
 			}
-			current, ok := contactByID[id]
+			current, ok := contactByID[targetID]
 			if !ok || current.State != "in-call" {
-				contactByID[id] = dashboardContact{
-					ID:      id,
-					Name:    resolveName(nameLookup, id),
+				name := current.Name
+				if name == "" {
+					name = resolveName(nameLookup, targetID)
+				}
+				contactByID[targetID] = dashboardContact{
+					ID:      targetID,
+					Name:    name,
 					State:   state,
 					Detail:  call.State,
 					Updated: call.Updated,
+					Known:   current.Known,
 				}
 			}
 		}
@@ -223,6 +284,9 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 		contacts = append(contacts, c)
 	}
 	sort.Slice(contacts, func(i, j int) bool {
+		if contacts[i].Known != contacts[j].Known {
+			return contacts[i].Known
+		}
 		wi := contactStateWeight(contacts[i].State)
 		wj := contactStateWeight(contacts[j].State)
 		if wi != wj {
@@ -250,10 +314,12 @@ func contactStateWeight(state string) int {
 		return 1
 	case "online", "active":
 		return 2
-	case "offline":
+	case "unknown":
 		return 3
-	default:
+	case "offline":
 		return 4
+	default:
+		return 5
 	}
 }
 
@@ -444,7 +510,13 @@ const callsDashboardHTML = `<!DOCTYPE html>
     .grid{
       display:grid;
       gap:1rem;
-      grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+      grid-template-columns:repeat(3,minmax(0,1fr));
+    }
+    @media (max-width: 1100px){
+      .grid{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+    }
+    @media (max-width: 760px){
+      .grid{ grid-template-columns:1fr; }
     }
     .panel{
       background:var(--card);
@@ -508,6 +580,7 @@ const callsDashboardHTML = `<!DOCTYPE html>
     .badge.status-error{ background:var(--danger); }
     .badge.status-online{ background:#0f766e; }
     .badge.status-offline{ background:#64748b; }
+    .badge.status-unknown{ background:#475569; }
     .badge.status-in-call{ background:#1d4ed8; }
     .empty{
       color:var(--muted);
@@ -597,7 +670,7 @@ const callsDashboardHTML = `<!DOCTYPE html>
       if (state === "ringing" || state === "dialing" || state === "busy") return { label: state, className: "status-no-answer" };
       if (state === "online" || state === "active") return { label: "Online", className: "status-online" };
       if (state === "offline") return { label: "Offline", className: "status-offline" };
-      return { label: contact.state || "Unknown", className: "status-offline" };
+      return { label: contact.state || "Unknown", className: "status-unknown" };
     }
 
     function renderList(el, calls, emptyText, isHistory) {
@@ -683,7 +756,13 @@ const callsDashboardHTML = `<!DOCTYPE html>
         const meta = document.createElement("div");
         meta.className = "meta";
         const left = document.createElement("span");
-        left.textContent = contact.detail ? ("Detail: " + contact.detail) : "";
+        if (contact.detail) {
+          left.textContent = "Detail: " + contact.detail;
+        } else if (!contact.known) {
+          left.textContent = "Not in phonebook";
+        } else {
+          left.textContent = "";
+        }
         const right = document.createElement("span");
         right.textContent = contact.updated ? ("Seen: " + fmtWhen(contact.updated)) : "";
         meta.appendChild(left);
