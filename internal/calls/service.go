@@ -209,7 +209,33 @@ func (s *Service) LoadCDR(path string) (int, error) {
 }
 
 func parseCDRTime(raw string) (time.Time, error) {
-	return time.ParseInLocation("2006-01-02 15:04:05", strings.TrimSpace(raw), time.Local)
+	const layout = "2006-01-02 15:04:05"
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return time.Time{}, errors.New("empty CDR timestamp")
+	}
+
+	localTS, localErr := time.ParseInLocation(layout, value, time.Local)
+	utcTS, utcErr := time.ParseInLocation(layout, value, time.UTC)
+
+	switch {
+	case localErr == nil && utcErr == nil:
+		// Some systems log CDR in local time, others in UTC (usegmtime=yes).
+		// Prefer whichever interpretation is closer to "now" to avoid obviously shifted times.
+		now := time.Now()
+		localDelta := absDuration(now.Sub(localTS))
+		utcDelta := absDuration(now.Sub(utcTS))
+		if utcDelta < localDelta {
+			return utcTS, nil
+		}
+		return localTS, nil
+	case localErr == nil:
+		return localTS, nil
+	case utcErr == nil:
+		return utcTS, nil
+	default:
+		return time.Time{}, localErr
+	}
 }
 
 // RunAMI connects to AMI, streams events, and reconnects until ctx cancellation.
@@ -336,7 +362,7 @@ func readAMIMessage(reader *bufio.Reader) (map[string]string, error) {
 // HandleAMIEvent updates active/history state from one AMI event.
 func (s *Service) HandleAMIEvent(event map[string]string) {
 	now := time.Now().UTC()
-	eventType := strings.ToLower(strings.TrimSpace(event["Event"]))
+	eventType := strings.ToLower(strings.TrimSpace(eventValue(event, "Event")))
 	linkedID := linkedIDFor(event)
 	if linkedID == "" {
 		return
@@ -344,72 +370,140 @@ func (s *Service) HandleAMIEvent(event map[string]string) {
 
 	s.mu.Lock()
 	changed := false
-	call := s.getOrCreateCallLocked(linkedID, now)
+	call := s.active[linkedID]
+	ensureCall := func() {
+		if call == nil {
+			call = s.getOrCreateCallLocked(linkedID, now)
+		}
+	}
 
 	switch eventType {
 	case "newchannel":
+		ensureCall()
 		if channel := channelKey(event); channel != "" {
 			call.channels[channel] = struct{}{}
 			changed = true
 		}
-		if from := firstNonEmpty(cleanNumber(event["CallerIDNum"]), cleanNumber(channelPeer(event["Channel"]))); call.From == "" && from != "" {
+		if from := firstNonEmpty(
+			cleanNumber(eventValue(event, "CallerIDNum", "CallerIDnum")),
+			cleanNumber(channelPeer(eventValue(event, "Channel"))),
+		); call.From == "" && from != "" {
 			call.From = from
 			changed = true
 		}
-		if to := firstNonEmpty(cleanTarget(event["Exten"]), cleanNumber(event["ConnectedLineNum"])); call.To == "" && to != "" {
+		if to := firstNonEmpty(
+			cleanTarget(eventValue(event, "Exten")),
+			cleanNumber(eventValue(event, "ConnectedLineNum", "ConnectedLineNum")),
+		); call.To == "" && to != "" {
 			call.To = to
 			changed = true
 		}
-		if state := strings.ToLower(strings.TrimSpace(event["ChannelStateDesc"])); state != "" {
+		if state := strings.ToLower(strings.TrimSpace(eventValue(event, "ChannelStateDesc", "Channelstatedesc"))); state != "" {
 			call.State = state
 			changed = true
 		}
 	case "dialbegin":
-		if from := firstNonEmpty(cleanNumber(event["CallerIDNum"]), cleanNumber(channelPeer(event["SrcChannel"]))); call.From == "" && from != "" {
+		ensureCall()
+		if from := firstNonEmpty(
+			cleanNumber(eventValue(event, "CallerIDNum", "CallerIDnum")),
+			cleanNumber(channelPeer(eventValue(event, "SrcChannel", "SourceChannel"))),
+		); call.From == "" && from != "" {
 			call.From = from
 			changed = true
 		}
-		if to := firstNonEmpty(cleanNumber(parseDialString(event["DialString"])), cleanNumber(channelPeer(event["DestChannel"]))); call.To == "" && to != "" {
+		if to := firstNonEmpty(
+			cleanNumber(parseDialString(eventValue(event, "DialString", "Dialstring"))),
+			cleanNumber(channelPeer(eventValue(event, "DestChannel", "DestinationChannel"))),
+		); call.To == "" && to != "" {
 			call.To = to
 			changed = true
 		}
-		if src := strings.TrimSpace(event["SrcUniqueID"]); src != "" {
+		if src := strings.TrimSpace(eventValue(event, "SrcUniqueID", "SrcUniqueId", "SrcUniqueid")); src != "" {
 			call.channels[src] = struct{}{}
 			changed = true
 		}
-		if dst := strings.TrimSpace(event["DestUniqueID"]); dst != "" {
+		if dst := strings.TrimSpace(eventValue(event, "DestUniqueID", "DestUniqueId", "DestUniqueid")); dst != "" {
 			call.channels[dst] = struct{}{}
 			changed = true
 		}
 		call.State = "dialing"
 		changed = true
+	case "dial":
+		subEvent := strings.ToLower(strings.TrimSpace(eventValue(event, "SubEvent", "Subevent")))
+		if subEvent == "begin" {
+			ensureCall()
+			if from := firstNonEmpty(
+				cleanNumber(eventValue(event, "CallerIDNum", "CallerIDnum")),
+				cleanNumber(channelPeer(eventValue(event, "SrcChannel", "SourceChannel"))),
+			); call.From == "" && from != "" {
+				call.From = from
+				changed = true
+			}
+			if to := firstNonEmpty(
+				cleanNumber(parseDialString(eventValue(event, "DialString", "Dialstring"))),
+				cleanNumber(channelPeer(eventValue(event, "DestChannel", "DestinationChannel"))),
+			); call.To == "" && to != "" {
+				call.To = to
+				changed = true
+			}
+			if src := strings.TrimSpace(eventValue(event, "SrcUniqueID", "SrcUniqueId", "SrcUniqueid")); src != "" {
+				call.channels[src] = struct{}{}
+				changed = true
+			}
+			if dst := strings.TrimSpace(eventValue(event, "DestUniqueID", "DestUniqueId", "DestUniqueid")); dst != "" {
+				call.channels[dst] = struct{}{}
+				changed = true
+			}
+			call.State = "dialing"
+			changed = true
+		}
 	case "newstate":
-		if state := strings.ToLower(strings.TrimSpace(event["ChannelStateDesc"])); state != "" {
+		ensureCall()
+		if state := strings.ToLower(strings.TrimSpace(eventValue(event, "ChannelStateDesc", "Channelstatedesc"))); state != "" {
 			call.State = state
 			changed = true
 		}
 	case "bridgeenter":
+		ensureCall()
 		call.State = "active"
 		if channel := channelKey(event); channel != "" {
 			call.channels[channel] = struct{}{}
 		}
 		changed = true
 	case "bridgeleave":
+		if call == nil {
+			break
+		}
 		call.State = "ringing"
 		changed = true
 	case "hangup":
+		if call == nil {
+			break
+		}
 		channel := channelKey(event)
 		if channel != "" {
 			delete(call.channels, channel)
 			changed = true
 		}
 		if len(call.channels) == 0 {
+			endReason := strings.TrimSpace(firstNonEmpty(eventValue(event, "Cause-txt"), eventValue(event, "Cause"), eventValue(event, "DialStatus")))
+			state := "completed"
+			if reason := strings.ToLower(endReason); reason != "" {
+				switch {
+				case strings.Contains(reason, "404"), strings.Contains(reason, "not found"), strings.Contains(reason, "error"), strings.Contains(reason, "failed"), strings.Contains(reason, "congestion"), strings.Contains(reason, "unavailable"), strings.Contains(reason, "reject"):
+					state = "error"
+				case strings.Contains(reason, "no answer"), strings.Contains(reason, "busy"), strings.Contains(reason, "cancel"), strings.Contains(reason, "timeout"):
+					state = "no-answer"
+				case strings.Contains(reason, "normal clearing"), strings.Contains(reason, "answered"):
+					state = "answered"
+				}
+			}
 			h := HistoryCall{
 				ID:          call.ID,
 				From:        call.From,
 				To:          call.To,
-				State:       "completed",
-				EndReason:   strings.TrimSpace(firstNonEmpty(event["Cause-txt"], event["Cause"])),
+				State:       state,
+				EndReason:   endReason,
 				Start:       call.Start.UTC(),
 				End:         now,
 				DurationSec: int64(now.Sub(call.Start).Seconds()),
@@ -484,11 +578,17 @@ func notify(channels []chan struct{}) {
 }
 
 func linkedIDFor(event map[string]string) string {
-	return strings.TrimSpace(firstNonEmpty(event["Linkedid"], event["Uniqueid"], event["LinkedID"]))
+	return strings.TrimSpace(firstNonEmpty(
+		eventValue(event, "Linkedid", "LinkedID", "LinkedId"),
+		eventValue(event, "Uniqueid", "UniqueID", "UniqueId"),
+	))
 }
 
 func channelKey(event map[string]string) string {
-	return strings.TrimSpace(firstNonEmpty(event["Uniqueid"], event["UniqueID"], event["Channel"]))
+	return strings.TrimSpace(firstNonEmpty(
+		eventValue(event, "Uniqueid", "UniqueID", "UniqueId"),
+		eventValue(event, "Channel"),
+	))
 }
 
 func parseDialString(raw string) string {
@@ -546,6 +646,29 @@ func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
 			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
+func eventValue(event map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if v, ok := event[key]; ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	for _, key := range keys {
+		for eventKey, eventVal := range event {
+			if strings.EqualFold(eventKey, key) && strings.TrimSpace(eventVal) != "" {
+				return strings.TrimSpace(eventVal)
+			}
 		}
 	}
 	return ""

@@ -126,12 +126,14 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 
 	active := make([]dashboardCall, 0, len(callSnapshot.Active))
 	for _, call := range callSnapshot.Active {
+		fromParty := canonicalParty(call.From)
+		toParty := canonicalParty(call.To)
 		active = append(active, dashboardCall{
 			ID:          call.ID,
-			From:        call.From,
-			FromName:    resolveName(nameLookup, call.From),
-			To:          call.To,
-			ToName:      resolveName(nameLookup, call.To),
+			From:        fromParty,
+			FromName:    resolveName(nameLookup, fromParty),
+			To:          toParty,
+			ToName:      resolveName(nameLookup, toParty),
 			State:       call.State,
 			Start:       call.Start,
 			DurationSec: int64(time.Since(call.Start).Seconds()),
@@ -140,12 +142,14 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 
 	history := make([]dashboardCall, 0, len(callSnapshot.History))
 	for _, call := range callSnapshot.History {
+		fromParty := canonicalParty(call.From)
+		toParty := canonicalParty(call.To)
 		history = append(history, dashboardCall{
 			ID:          call.ID,
-			From:        call.From,
-			FromName:    resolveName(nameLookup, call.From),
-			To:          call.To,
-			ToName:      resolveName(nameLookup, call.To),
+			From:        fromParty,
+			FromName:    resolveName(nameLookup, fromParty),
+			To:          toParty,
+			ToName:      resolveName(nameLookup, toParty),
 			State:       call.State,
 			EndReason:   call.EndReason,
 			Start:       call.Start,
@@ -164,9 +168,9 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 func buildNameLookup(contacts []model.Contact) map[string]string {
 	lookup := make(map[string]string, len(contacts)*2)
 	for _, contact := range contacts {
-		name := strings.TrimSpace(strings.TrimSpace(contact.FirstName + " " + contact.LastName))
+		name := strings.TrimSpace(contact.FirstName + " " + contact.LastName)
 		if name == "" {
-			name = strings.TrimSpace(contact.Extension)
+			continue
 		}
 		addLookupEntry(lookup, contact.Extension, name)
 		for _, phone := range contact.Phones {
@@ -213,6 +217,14 @@ func normalizeNumber(raw string) string {
 		}
 	}
 	return b.String()
+}
+
+func canonicalParty(raw string) string {
+	clean := normalizeNumber(raw)
+	if clean != "" {
+		return clean
+	}
+	return strings.TrimSpace(raw)
 }
 
 func upgradeWebSocket(w http.ResponseWriter, r *http.Request) (net.Conn, error) {
@@ -302,6 +314,8 @@ const callsDashboardHTML = `<!DOCTYPE html>
       --text:#0f172a;
       --muted:#5b6472;
       --accent:#166534;
+      --warn:#ca8a04;
+      --danger:#b91c1c;
       --line:#d8dee7;
       --history:#fff7ed;
     }
@@ -397,6 +411,9 @@ const callsDashboardHTML = `<!DOCTYPE html>
       text-transform:uppercase;
       letter-spacing:0.03em;
     }
+    .badge.status-answered{ background:var(--accent); }
+    .badge.status-no-answer{ background:var(--warn); }
+    .badge.status-error{ background:var(--danger); }
     .empty{
       color:var(--muted);
       padding:1rem;
@@ -434,6 +451,7 @@ const callsDashboardHTML = `<!DOCTYPE html>
     const activeEl = document.getElementById("active");
     const historyEl = document.getElementById("history");
     const stampEl = document.getElementById("stamp");
+    let pollTimer = null;
 
     function label(name, number) {
       if (name && number) return name + " (" + number + ")";
@@ -443,6 +461,33 @@ const callsDashboardHTML = `<!DOCTYPE html>
     function fmtWhen(ts) {
       if (!ts) return "";
       return new Date(ts).toLocaleString();
+    }
+
+    function statusForCall(call, isHistory) {
+      const state = String(call.state || "").toLowerCase();
+      const reason = String(call.end_reason || "").toLowerCase();
+      const source = state + " " + reason;
+
+      if (!isHistory) {
+        if (state === "active" || state === "up") {
+          return { label: "Active", className: "status-answered" };
+        }
+        if (state === "ringing" || state === "dialing") {
+          return { label: call.state || "Ringing", className: "status-no-answer" };
+        }
+        return { label: call.state || "Active", className: "status-no-answer" };
+      }
+
+      if (source.includes("404") || source.includes("not found") || source.includes("error") || source.includes("failed") || source.includes("failure") || source.includes("congestion") || source.includes("unavailable") || source.includes("reject")) {
+        return { label: "Error", className: "status-error" };
+      }
+      if (source.includes("no answer") || source.includes("busy") || source.includes("cancel") || source.includes("timeout")) {
+        return { label: "No Answer", className: "status-no-answer" };
+      }
+      if (source.includes("answered") || source.includes("normal clearing") || source.includes("completed")) {
+        return { label: "Answered", className: "status-answered" };
+      }
+      return { label: "No Answer", className: "status-no-answer" };
     }
 
     function renderList(el, calls, emptyText, isHistory) {
@@ -456,13 +501,22 @@ const callsDashboardHTML = `<!DOCTYPE html>
       }
       calls.forEach((call) => {
         const li = document.createElement("li");
+        const status = statusForCall(call, isHistory);
         const parties = document.createElement("div");
         parties.className = "parties";
-        parties.innerHTML =
-          "<span>" + label(call.from_name, call.from) + "</span>" +
-          "<span>&rarr;</span>" +
-          "<span>" + label(call.to_name, call.to) + "</span>" +
-          "<span class=\"badge\">" + (call.state || (isHistory ? "completed" : "active")) + "</span>";
+        const from = document.createElement("span");
+        from.textContent = label(call.from_name, call.from);
+        const arrow = document.createElement("span");
+        arrow.innerHTML = "&rarr;";
+        const to = document.createElement("span");
+        to.textContent = label(call.to_name, call.to);
+        const badge = document.createElement("span");
+        badge.className = "badge " + status.className;
+        badge.textContent = status.label;
+        parties.appendChild(from);
+        parties.appendChild(arrow);
+        parties.appendChild(to);
+        parties.appendChild(badge);
         const meta = document.createElement("div");
         meta.className = "meta";
         const left = document.createElement("span");
@@ -506,6 +560,17 @@ const callsDashboardHTML = `<!DOCTYPE html>
       }
     }
 
+    function startPolling() {
+      if (pollTimer !== null) return;
+      pollTimer = setInterval(fallbackPoll, 10000);
+    }
+
+    function stopPolling() {
+      if (pollTimer === null) return;
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
     function startWebSocket() {
       const ws = new WebSocket(wsURL);
       ws.onmessage = (event) => {
@@ -518,9 +583,11 @@ const callsDashboardHTML = `<!DOCTYPE html>
       };
       ws.onopen = () => {
         stampEl.textContent = "live connection established";
+        stopPolling();
       };
       ws.onclose = () => {
         stampEl.textContent = "live connection closed, retrying...";
+        startPolling();
         setTimeout(startWebSocket, 1500);
       };
       ws.onerror = () => {
@@ -529,8 +596,8 @@ const callsDashboardHTML = `<!DOCTYPE html>
     }
 
     fallbackPoll();
+    startPolling();
     startWebSocket();
-    setInterval(fallbackPoll, 10000);
   </script>
 </body>
 </html>

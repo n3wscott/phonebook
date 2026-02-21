@@ -57,3 +57,26 @@ func TestParseDialString(t *testing.T) {
 		t.Fatalf("expected first dial target, got %q", got)
 	}
 }
+
+func TestHandleAMIEventDialSubEventBeginCreatesActive(t *testing.T) {
+	svc := NewService(Options{MaxHistory: 100, Retention: 7 * 24 * time.Hour}, testLogger{})
+
+	svc.HandleAMIEvent(map[string]string{
+		"Event":        "Dial",
+		"SubEvent":     "Begin",
+		"LinkedID":     "linked-1",
+		"SrcUniqueId":  "src-1",
+		"DestUniqueId": "dst-1",
+		"CallerIDNum":  "2601",
+		"DialString":   "PJSIP/8081,30",
+	})
+
+	snap := svc.Snapshot()
+	if len(snap.Active) != 1 {
+		t.Fatalf("expected 1 active call, got %d", len(snap.Active))
+	}
+	got := snap.Active[0]
+	if got.From != "2601" || got.To != "8081" {
+		t.Fatalf("unexpected call parties: %+v", got)
+	}
+}
