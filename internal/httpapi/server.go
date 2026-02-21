@@ -85,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc(s.join("calls/ws"), s.handleCallsWS)
 		mux.HandleFunc(s.join("api/calls/active"), s.handleCallsActive)
 		mux.HandleFunc(s.join("api/calls/history"), s.handleCallsHistory)
+		mux.HandleFunc(s.join("api/calls/contacts"), s.handleCallsContacts)
 	}
 	if s.allowDebug {
 		mux.HandleFunc(s.join("debug"), s.handleDebug)

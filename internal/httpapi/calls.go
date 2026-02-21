@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,9 +29,18 @@ type dashboardCall struct {
 }
 
 type dashboardPayload struct {
-	GeneratedAt time.Time       `json:"generated_at"`
-	Active      []dashboardCall `json:"active"`
-	History     []dashboardCall `json:"history"`
+	GeneratedAt time.Time          `json:"generated_at"`
+	Active      []dashboardCall    `json:"active"`
+	History     []dashboardCall    `json:"history"`
+	Contacts    []dashboardContact `json:"contacts"`
+}
+
+type dashboardContact struct {
+	ID      string    `json:"id"`
+	Name    string    `json:"name,omitempty"`
+	State   string    `json:"state"`
+	Detail  string    `json:"detail,omitempty"`
+	Updated time.Time `json:"updated,omitempty"`
 }
 
 func (s *Server) handleCallsPage(w http.ResponseWriter, _ *http.Request) {
@@ -41,8 +51,9 @@ func (s *Server) handleCallsPage(w http.ResponseWriter, _ *http.Request) {
 	wsPath := s.join("calls/ws")
 	activePath := s.join("api/calls/active")
 	historyPath := s.join("api/calls/history")
+	contactsPath := s.join("api/calls/contacts")
 
-	page := fmt.Sprintf(callsDashboardHTML, wsPath, activePath, historyPath)
+	page := fmt.Sprintf(callsDashboardHTML, wsPath, activePath, historyPath, contactsPath)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(page))
 }
@@ -70,6 +81,19 @@ func (s *Server) handleCallsHistory(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"generated_at": payload.GeneratedAt,
 		"history":      payload.History,
+	})
+}
+
+func (s *Server) handleCallsContacts(w http.ResponseWriter, _ *http.Request) {
+	if s.calls == nil {
+		http.Error(w, "calls dashboard disabled", http.StatusServiceUnavailable)
+		return
+	}
+	payload := s.buildCallsPayload()
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"generated_at": payload.GeneratedAt,
+		"contacts":     payload.Contacts,
 	})
 }
 
@@ -158,10 +182,78 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 		})
 	}
 
+	contactByID := make(map[string]dashboardContact)
+	for _, p := range callSnapshot.Presences {
+		id := canonicalParty(p.ID)
+		if id == "" {
+			continue
+		}
+		contactByID[id] = dashboardContact{
+			ID:      id,
+			Name:    resolveName(nameLookup, id),
+			State:   p.State,
+			Detail:  p.Detail,
+			Updated: p.Updated,
+		}
+	}
+	for _, call := range callSnapshot.Active {
+		for _, rawID := range []string{call.From, call.To} {
+			id := canonicalParty(rawID)
+			if id == "" {
+				continue
+			}
+			state := "in-call"
+			if call.State == "ringing" || call.State == "dialing" {
+				state = call.State
+			}
+			current, ok := contactByID[id]
+			if !ok || current.State != "in-call" {
+				contactByID[id] = dashboardContact{
+					ID:      id,
+					Name:    resolveName(nameLookup, id),
+					State:   state,
+					Detail:  call.State,
+					Updated: call.Updated,
+				}
+			}
+		}
+	}
+	contacts := make([]dashboardContact, 0, len(contactByID))
+	for _, c := range contactByID {
+		contacts = append(contacts, c)
+	}
+	sort.Slice(contacts, func(i, j int) bool {
+		wi := contactStateWeight(contacts[i].State)
+		wj := contactStateWeight(contacts[j].State)
+		if wi != wj {
+			return wi < wj
+		}
+		if contacts[i].Name != contacts[j].Name {
+			return contacts[i].Name < contacts[j].Name
+		}
+		return contacts[i].ID < contacts[j].ID
+	})
+
 	return dashboardPayload{
 		GeneratedAt: time.Now().UTC(),
 		Active:      active,
 		History:     history,
+		Contacts:    contacts,
+	}
+}
+
+func contactStateWeight(state string) int {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "in-call":
+		return 0
+	case "ringing", "dialing", "busy":
+		return 1
+	case "online", "active":
+		return 2
+	case "offline":
+		return 3
+	default:
+		return 4
 	}
 }
 
@@ -414,6 +506,9 @@ const callsDashboardHTML = `<!DOCTYPE html>
     .badge.status-answered{ background:var(--accent); }
     .badge.status-no-answer{ background:var(--warn); }
     .badge.status-error{ background:var(--danger); }
+    .badge.status-online{ background:#0f766e; }
+    .badge.status-offline{ background:#64748b; }
+    .badge.status-in-call{ background:#1d4ed8; }
     .empty{
       color:var(--muted);
       padding:1rem;
@@ -440,16 +535,22 @@ const callsDashboardHTML = `<!DOCTYPE html>
         <h2>History (last 100 / 7d)</h2>
         <ul id="history"></ul>
       </section>
+      <section class="panel">
+        <h2>Presence</h2>
+        <ul id="contacts"></ul>
+      </section>
     </div>
   </div>
   <script>
     const wsPath = %q;
     const activeApi = %q;
     const historyApi = %q;
+    const contactsApi = %q;
     const wsScheme = location.protocol === "https:" ? "wss://" : "ws://";
     const wsURL = wsScheme + location.host + wsPath;
     const activeEl = document.getElementById("active");
     const historyEl = document.getElementById("history");
+    const contactsEl = document.getElementById("contacts");
     const stampEl = document.getElementById("stamp");
     let pollTimer = null;
 
@@ -488,6 +589,15 @@ const callsDashboardHTML = `<!DOCTYPE html>
         return { label: "Answered", className: "status-answered" };
       }
       return { label: "No Answer", className: "status-no-answer" };
+    }
+
+    function statusForContact(contact) {
+      const state = String(contact.state || "").toLowerCase();
+      if (state === "in-call") return { label: "In Call", className: "status-in-call" };
+      if (state === "ringing" || state === "dialing" || state === "busy") return { label: state, className: "status-no-answer" };
+      if (state === "online" || state === "active") return { label: "Online", className: "status-online" };
+      if (state === "offline") return { label: "Offline", className: "status-offline" };
+      return { label: contact.state || "Unknown", className: "status-offline" };
     }
 
     function renderList(el, calls, emptyText, isHistory) {
@@ -540,20 +650,60 @@ const callsDashboardHTML = `<!DOCTYPE html>
     function applyPayload(payload) {
       renderList(activeEl, payload.active, "No active calls right now.", false);
       renderList(historyEl, payload.history, "No historical calls available.", true);
+      renderContacts(contactsEl, payload.contacts || []);
       if (payload.generated_at) {
         stampEl.textContent = "updated " + new Date(payload.generated_at).toLocaleTimeString();
       }
     }
 
+    function renderContacts(el, contacts) {
+      el.innerHTML = "";
+      if (!contacts || contacts.length === 0) {
+        const item = document.createElement("li");
+        item.className = "empty";
+        item.textContent = "No presence data yet.";
+        el.appendChild(item);
+        return;
+      }
+      contacts.forEach((contact) => {
+        const li = document.createElement("li");
+        const parties = document.createElement("div");
+        parties.className = "parties";
+        const who = document.createElement("span");
+        const identity = contact.name ? contact.name + " (" + (contact.id || "unknown") + ")" : (contact.id || "unknown");
+        who.textContent = identity;
+        const badge = document.createElement("span");
+        const status = statusForContact(contact);
+        badge.className = "badge " + status.className;
+        badge.textContent = status.label;
+        parties.appendChild(who);
+        parties.appendChild(badge);
+        li.appendChild(parties);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        const left = document.createElement("span");
+        left.textContent = contact.detail ? ("Detail: " + contact.detail) : "";
+        const right = document.createElement("span");
+        right.textContent = contact.updated ? ("Seen: " + fmtWhen(contact.updated)) : "";
+        meta.appendChild(left);
+        meta.appendChild(right);
+        li.appendChild(meta);
+        el.appendChild(li);
+      });
+    }
+
     async function fallbackPoll() {
       try {
-        const [activeRes, historyRes] = await Promise.all([fetch(activeApi), fetch(historyApi)]);
+        const [activeRes, historyRes, contactsRes] = await Promise.all([fetch(activeApi), fetch(historyApi), fetch(contactsApi)]);
         const activeJson = await activeRes.json();
         const historyJson = await historyRes.json();
+        const contactsJson = await contactsRes.json();
         applyPayload({
-          generated_at: activeJson.generated_at || historyJson.generated_at,
+          generated_at: activeJson.generated_at || historyJson.generated_at || contactsJson.generated_at,
           active: activeJson.active || [],
-          history: historyJson.history || []
+          history: historyJson.history || [],
+          contacts: contactsJson.contacts || []
         });
       } catch (err) {
         stampEl.textContent = "polling error";

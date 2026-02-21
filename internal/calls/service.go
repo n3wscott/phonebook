@@ -60,10 +60,19 @@ type HistoryCall struct {
 	DurationSec int64     `json:"duration_sec"`
 }
 
+// Presence represents AMI-observed endpoint/contact presence.
+type Presence struct {
+	ID      string    `json:"id"`
+	State   string    `json:"state"`
+	Detail  string    `json:"detail,omitempty"`
+	Updated time.Time `json:"updated"`
+}
+
 // Snapshot is a read model for HTTP/UI clients.
 type Snapshot struct {
 	Active    []Call        `json:"active"`
 	History   []HistoryCall `json:"history"`
+	Presences []Presence    `json:"presences"`
 	UpdatedAt time.Time     `json:"updated_at"`
 }
 
@@ -77,10 +86,11 @@ type Service struct {
 	logger Logger
 	opts   Options
 
-	mu      sync.RWMutex
-	active  map[string]*activeCall
-	history []HistoryCall
-	updated time.Time
+	mu       sync.RWMutex
+	active   map[string]*activeCall
+	history  []HistoryCall
+	presence map[string]Presence
+	updated  time.Time
 
 	subs   map[int]chan struct{}
 	nextID int
@@ -95,10 +105,11 @@ func NewService(opts Options, logger Logger) *Service {
 		opts.Retention = 7 * 24 * time.Hour
 	}
 	return &Service{
-		logger: logger,
-		opts:   opts,
-		active: make(map[string]*activeCall),
-		subs:   make(map[int]chan struct{}),
+		logger:   logger,
+		opts:     opts,
+		active:   make(map[string]*activeCall),
+		presence: make(map[string]Presence),
+		subs:     make(map[int]chan struct{}),
 	}
 }
 
@@ -118,9 +129,21 @@ func (s *Service) Snapshot() Snapshot {
 	history := make([]HistoryCall, len(s.history))
 	copy(history, s.history)
 
+	presences := make([]Presence, 0, len(s.presence))
+	for _, p := range s.presence {
+		presences = append(presences, p)
+	}
+	sort.Slice(presences, func(i, j int) bool {
+		if presences[i].State == presences[j].State {
+			return presences[i].ID < presences[j].ID
+		}
+		return presences[i].State < presences[j].State
+	})
+
 	return Snapshot{
 		Active:    active,
 		History:   history,
+		Presences: presences,
 		UpdatedAt: s.updated,
 	}
 }
@@ -364,14 +387,20 @@ func (s *Service) HandleAMIEvent(event map[string]string) {
 	now := time.Now().UTC()
 	eventType := strings.ToLower(strings.TrimSpace(eventValue(event, "Event")))
 	linkedID := linkedIDFor(event)
-	if linkedID == "" {
+	if linkedID == "" && !isPresenceEvent(eventType) {
 		return
 	}
 
 	s.mu.Lock()
 	changed := false
-	call := s.active[linkedID]
+	var call *activeCall
+	if linkedID != "" {
+		call = s.active[linkedID]
+	}
 	ensureCall := func() {
+		if linkedID == "" {
+			return
+		}
 		if call == nil {
 			call = s.getOrCreateCallLocked(linkedID, now)
 		}
@@ -512,10 +541,27 @@ func (s *Service) HandleAMIEvent(event map[string]string) {
 			delete(s.active, call.ID)
 			changed = true
 		}
+	case "contactstatus", "endpointstatus", "devicestatechange", "peerstatus":
+		if id, ok := presenceIDFor(event); ok {
+			state, detail := presenceStateFor(eventType, event)
+			prev, hasPrev := s.presence[id]
+			next := Presence{
+				ID:      id,
+				State:   state,
+				Detail:  detail,
+				Updated: now,
+			}
+			if !hasPrev || prev.State != next.State || prev.Detail != next.Detail {
+				s.presence[id] = next
+				changed = true
+			}
+		}
 	}
 
 	if changed {
-		call.Updated = now
+		if call != nil {
+			call.Updated = now
+		}
 		s.pruneLocked(now)
 		s.updated = now
 	}
@@ -604,6 +650,80 @@ func channelKey(event map[string]string) string {
 	))
 }
 
+func presenceIDFor(event map[string]string) (string, bool) {
+	candidates := []string{
+		eventValue(event, "EndpointName", "Endpoint", "AOR", "ObjectName", "Peer"),
+		eventValue(event, "URI", "Contact"),
+		eventValue(event, "Channel", "DestChannel", "SrcChannel"),
+		eventValue(event, "Device"),
+	}
+	for _, candidate := range candidates {
+		id := cleanPresenceID(candidate)
+		if id != "" {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+func cleanPresenceID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.Contains(raw, "<") && strings.Contains(raw, ">") {
+		raw = raw[strings.Index(raw, "<")+1 : strings.LastIndex(raw, ">")]
+	}
+	if strings.Contains(raw, ":") && strings.Contains(raw, "@") {
+		if at := strings.Index(raw, "@"); at > 0 {
+			colon := strings.LastIndex(raw[:at], ":")
+			if colon >= 0 {
+				raw = raw[colon+1 : at]
+			}
+		}
+	}
+	if strings.Contains(raw, "/") {
+		raw = strings.SplitN(raw, "/", 2)[1]
+	}
+	raw = strings.SplitN(raw, "-", 2)[0]
+	raw = strings.SplitN(raw, "@", 2)[0]
+	n := cleanNumber(raw)
+	if n != "" {
+		return n
+	}
+	return strings.TrimSpace(raw)
+}
+
+func presenceStateFor(eventType string, event map[string]string) (string, string) {
+	raw := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		eventValue(event, "Status"),
+		eventValue(event, "EndpointStatus"),
+		eventValue(event, "PeerStatus"),
+		eventValue(event, "State"),
+	)))
+	detail := strings.TrimSpace(firstNonEmpty(
+		eventValue(event, "Cause"),
+		eventValue(event, "SubEvent"),
+		eventValue(event, "URI"),
+		eventValue(event, "ContactStatus"),
+	))
+	if raw == "" {
+		raw = eventType
+	}
+	switch {
+	case strings.Contains(raw, "inuse"), strings.Contains(raw, "busy"), strings.Contains(raw, "onhold"):
+		return "busy", detail
+	case strings.Contains(raw, "ring"), strings.Contains(raw, "dial"):
+		return "ringing", detail
+	case strings.Contains(raw, "reachable"), strings.Contains(raw, "online"), strings.Contains(raw, "registered"), strings.Contains(raw, "avail"), strings.Contains(raw, "ok"), strings.Contains(raw, "not_inuse"):
+		return "online", detail
+	case strings.Contains(raw, "unreachable"), strings.Contains(raw, "offline"), strings.Contains(raw, "unavailable"), strings.Contains(raw, "nonqualified"), strings.Contains(raw, "unknown"), strings.Contains(raw, "lagged"), strings.Contains(raw, "removed"):
+		return "offline", detail
+	default:
+		return raw, detail
+	}
+}
+
 func parseDialString(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -685,4 +805,13 @@ func eventValue(event map[string]string, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func isPresenceEvent(eventType string) bool {
+	switch strings.ToLower(strings.TrimSpace(eventType)) {
+	case "contactstatus", "endpointstatus", "devicestatechange", "peerstatus":
+		return true
+	default:
+		return false
+	}
 }

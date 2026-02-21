@@ -96,3 +96,44 @@ func TestLinkedIDForFallsBackToDestinationFieldsAndChannel(t *testing.T) {
 		t.Fatalf("expected channel fallback, got %q", got)
 	}
 }
+
+func TestHandleAMIEventPresenceContactStatus(t *testing.T) {
+	svc := NewService(Options{MaxHistory: 100, Retention: 7 * 24 * time.Hour}, testLogger{})
+	svc.HandleAMIEvent(map[string]string{
+		"Event":    "ContactStatus",
+		"AOR":      "2601",
+		"Status":   "Reachable",
+		"Endpoint": "2601",
+	})
+
+	snap := svc.Snapshot()
+	if len(snap.Presences) != 1 {
+		t.Fatalf("expected 1 presence, got %d", len(snap.Presences))
+	}
+	if snap.Presences[0].ID != "2601" {
+		t.Fatalf("expected presence id 2601, got %q", snap.Presences[0].ID)
+	}
+	if snap.Presences[0].State != "online" {
+		t.Fatalf("expected presence state online, got %q", snap.Presences[0].State)
+	}
+}
+
+func TestHandleAMIEventPresenceDeviceState(t *testing.T) {
+	svc := NewService(Options{MaxHistory: 100, Retention: 7 * 24 * time.Hour}, testLogger{})
+	svc.HandleAMIEvent(map[string]string{
+		"Event":  "DeviceStateChange",
+		"Device": "PJSIP/4027",
+		"State":  "INUSE",
+	})
+
+	snap := svc.Snapshot()
+	if len(snap.Presences) != 1 {
+		t.Fatalf("expected 1 presence, got %d", len(snap.Presences))
+	}
+	if snap.Presences[0].ID != "4027" {
+		t.Fatalf("expected presence id 4027, got %q", snap.Presences[0].ID)
+	}
+	if snap.Presences[0].State != "busy" {
+		t.Fatalf("expected presence state busy, got %q", snap.Presences[0].State)
+	}
+}
