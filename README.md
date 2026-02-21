@@ -48,6 +48,10 @@ go build -o phonebook .
 # Serve phonebook.xml (plus optional staged Asterisk configs)
 ./phonebook serve --dir ./examples --addr :8080 --base-path /xml/ --out ./out
 
+# Serve with live call dashboard (AMI)
+./phonebook serve --dir ./examples \
+  --ami-user dashboard --ami-pass "change-me" --ami-addr 127.0.0.1:5038
+
 # Generate phonebook.xml once
 ./phonebook generate xml --dir ./examples --out ./phonebook.xml
 
@@ -58,17 +62,52 @@ go build -o phonebook .
 ./phonebook validate --dir ./examples
 ```
 
-`serve` watches `--dir` recursively (fsnotify + 250 ms debounce), hot-rebuilds the in-memory dataset, updates the HTTP snapshot (with `ETag` / `Last-Modified`), and optionally refreshes staged `pjsip.conf`/`extensions.conf` under `--out`. TLS (`--tls-cert/--tls-key`), structured logging (`--log-level`), and base-path overrides match the previous behavior; unspecified paths fall back to the values in `config.yaml`.
+`serve` watches `--dir` recursively (fsnotify + 250 ms debounce), hot-rebuilds the in-memory dataset, updates the HTTP snapshot (with `ETag` / `Last-Modified`), and optionally refreshes staged `pjsip.conf`/`extensions.conf` under `--out`. TLS (`--tls-cert/--tls-key`), structured logging (`--log-level`), and base-path overrides match the previous behavior; unspecified paths fall back to the values in `config.yaml`.
 
 `generate asterisk --apply` writes atomically to `--dest` and then runs `asterisk -rx "pjsip reload"` and `dialplan reload`. `serve` never mutates `/etc/asterisk`.
 
 ## HTTP Endpoints
 
-- `${basePath}/phonebook.xml` – Grandstream XML (UTF‑8, multi-`<Phone>` support, caching headers)
-- `${basePath}/healthz` – `{"ok":true,"contacts":N,"version":V}`
-- `${basePath}/debug` – simple HTML listing (log level = `debug`)
+- `${basePath}/phonebook.xml` - Grandstream XML (UTF-8, multi-`<Phone>` support, caching headers)
+- `${basePath}/healthz` - `{"ok":true,"contacts":N,"version":V}`
+- `${basePath}/debug` - simple HTML listing (log level = `debug`)
+- `${basePath}/calls` - HTML dashboard with `Active` and `History` sections
+- `${basePath}/calls/ws` - WebSocket stream for live call updates
+- `${basePath}/api/calls/active` - JSON active calls
+- `${basePath}/api/calls/history` - JSON historical calls
 
 Point Grandstream phones at `http://HOST:PORT/<base-path>/` and they will fetch `<base-path>/phonebook.xml`.
+
+## AMI Setup
+
+The call dashboard consumes Asterisk AMI events and can optionally bootstrap history from CDR CSV.
+
+Add a read-only AMI user in `/etc/asterisk/manager.conf`:
+
+```ini
+[dashboard]
+secret = change-me
+read = system,call,log,verbose,command,agent,user,dtmf,reporting,cdr,dialplan
+write = none
+```
+
+Reload manager:
+
+```bash
+asterisk -rx "manager reload"
+```
+
+Then start `phonebook` with:
+
+```bash
+phonebook serve --dir /path/to/data \
+  --ami-user dashboard --ami-pass change-me --ami-addr 127.0.0.1:5038 \
+  --cdr-csv /var/log/asterisk/cdr-csv/Master.csv
+```
+
+Notes:
+- Without AMI credentials, `/calls` still loads but only shows CDR bootstrap history.
+- History retention is capped to last `100` calls and last `7` days.
 
 ## Development
 

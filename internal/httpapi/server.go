@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/n3wscott/phonebook/internal/calls"
 	"github.com/n3wscott/phonebook/internal/model"
 )
 
@@ -22,6 +23,7 @@ type Server struct {
 	tlsKey     string
 	allowDebug bool
 	logger     Logger
+	calls      *calls.Service
 
 	mu       sync.RWMutex
 	snapshot snapshot
@@ -38,11 +40,12 @@ type Logger interface {
 
 // Config bundles HTTP server options.
 type Config struct {
-	Addr       string
-	BasePath   string
-	TLSCert    string
-	TLSKey     string
-	AllowDebug bool
+	Addr        string
+	BasePath    string
+	TLSCert     string
+	TLSKey      string
+	AllowDebug  bool
+	CallService *calls.Service
 }
 
 // snapshot contains the data served to clients.
@@ -63,6 +66,7 @@ func New(cfg Config, logger Logger) *Server {
 		tlsKey:     cfg.TLSKey,
 		allowDebug: cfg.AllowDebug,
 		logger:     logger,
+		calls:      cfg.CallService,
 	}
 }
 
@@ -76,6 +80,12 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(s.join("phonebook.xml"), s.handlePhonebook)
 	mux.HandleFunc(s.join("healthz"), s.handleHealthz)
+	if s.calls != nil {
+		mux.HandleFunc(s.join("calls"), s.handleCallsPage)
+		mux.HandleFunc(s.join("calls/ws"), s.handleCallsWS)
+		mux.HandleFunc(s.join("api/calls/active"), s.handleCallsActive)
+		mux.HandleFunc(s.join("api/calls/history"), s.handleCallsHistory)
+	}
 	if s.allowDebug {
 		mux.HandleFunc(s.join("debug"), s.handleDebug)
 	}

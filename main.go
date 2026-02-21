@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/n3wscott/phonebook/internal/calls"
 	"github.com/n3wscott/phonebook/internal/fswatch"
 	"github.com/n3wscott/phonebook/internal/httpapi"
 	"github.com/n3wscott/phonebook/internal/project"
@@ -55,6 +56,10 @@ type serveFlags struct {
 	tlsCert  string
 	tlsKey   string
 	logLevel string
+	amiAddr  string
+	amiUser  string
+	amiPass  string
+	cdrCSV   string
 }
 
 func cmdServe(args []string) error {
@@ -72,13 +77,42 @@ func cmdServe(args []string) error {
 
 	addr := flags.addr
 	basePath := normalizeBasePath(flags.basePath)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	callService := calls.NewService(calls.Options{
+		MaxHistory: 100,
+		Retention:  7 * 24 * time.Hour,
+	}, logger)
+	if flags.cdrCSV != "" {
+		loaded, err := callService.LoadCDR(flags.cdrCSV)
+		if err != nil {
+			logger.Warn("failed to load CDR history", "path", flags.cdrCSV, "err", err)
+		} else if loaded > 0 {
+			logger.Info("loaded historical calls from CDR", "count", loaded, "path", flags.cdrCSV)
+		}
+	}
+	if flags.amiUser != "" && flags.amiPass != "" {
+		go func() {
+			if err := callService.RunAMI(ctx, calls.AMIConfig{
+				Addr:     flags.amiAddr,
+				Username: flags.amiUser,
+				Password: flags.amiPass,
+			}); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("AMI listener exited", "err", err)
+			}
+		}()
+	} else {
+		logger.Warn("AMI listener disabled; set --ami-user and --ami-pass to enable live call tracking")
+	}
 
 	server := httpapi.NewServer(httpapi.Config{
-		Addr:       addr,
-		BasePath:   basePath,
-		TLSCert:    flags.tlsCert,
-		TLSKey:     flags.tlsKey,
-		AllowDebug: level <= slog.LevelDebug,
+		Addr:        addr,
+		BasePath:    basePath,
+		TLSCert:     flags.tlsCert,
+		TLSKey:      flags.tlsKey,
+		AllowDebug:  level <= slog.LevelDebug,
+		CallService: callService,
 	}, logger)
 	server.Update(state.Contacts, state.Phonebook, state.LastUpdate)
 
@@ -89,9 +123,6 @@ func cmdServe(args []string) error {
 	}
 
 	logger.Info("serving phonebook", "addr", addr, "basePath", basePath, "contacts", len(state.Contacts))
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	watcher, err := fswatch.New(flags.dir, defaultDebounce, logger)
 	if err != nil {
@@ -230,6 +261,10 @@ func parseServeFlags(args []string) (serveFlags, error) {
 	fs.StringVar(&flags.tlsCert, "tls-cert", getenv("PHONEBOOK_TLS_CERT", ""), "TLS certificate path")
 	fs.StringVar(&flags.tlsKey, "tls-key", getenv("PHONEBOOK_TLS_KEY", ""), "TLS private key path")
 	fs.StringVar(&flags.logLevel, "log-level", getenv("PHONEBOOK_LOG_LEVEL", "info"), "log level (debug, info, error)")
+	fs.StringVar(&flags.amiAddr, "ami-addr", getenv("PHONEBOOK_AMI_ADDR", "127.0.0.1:5038"), "Asterisk AMI address")
+	fs.StringVar(&flags.amiUser, "ami-user", getenv("PHONEBOOK_AMI_USER", ""), "Asterisk AMI username")
+	fs.StringVar(&flags.amiPass, "ami-pass", getenv("PHONEBOOK_AMI_PASS", ""), "Asterisk AMI password")
+	fs.StringVar(&flags.cdrCSV, "cdr-csv", getenv("PHONEBOOK_CDR_CSV", "/var/log/asterisk/cdr-csv/Master.csv"), "CDR CSV path for startup history bootstrap")
 	if err := fs.Parse(args); err != nil {
 		return flags, err
 	}
