@@ -209,8 +209,8 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 			contactByID[id] = dashboardContact{
 				ID:     id,
 				Name:   name,
-				State:  "unknown",
-				Detail: "not seen in AMI yet",
+				State:  "disconnected",
+				Detail: "no endpoint presence yet",
 				Known:  true,
 			}
 		}
@@ -258,12 +258,9 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 			if mappedID, ok := aliasToID[id]; ok {
 				targetID = mappedID
 			}
-			state := "in-call"
-			if call.State == "ringing" || call.State == "dialing" {
-				state = call.State
-			}
+			state := "in-use"
 			current, ok := contactByID[targetID]
-			if !ok || current.State != "in-call" {
+			if !ok || current.State != "in-use" {
 				name := current.Name
 				if name == "" {
 					name = resolveName(nameLookup, targetID)
@@ -308,18 +305,14 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 
 func contactStateWeight(state string) int {
 	switch strings.ToLower(strings.TrimSpace(state)) {
-	case "in-call":
+	case "in-use", "in use", "in-call":
 		return 0
-	case "ringing", "dialing", "busy":
+	case "connected", "not in use", "online", "active":
 		return 1
-	case "online", "active":
+	case "disconnected", "offline", "unknown":
 		return 2
-	case "unknown":
-		return 3
-	case "offline":
-		return 4
 	default:
-		return 5
+		return 3
 	}
 }
 
@@ -578,9 +571,9 @@ const callsDashboardHTML = `<!DOCTYPE html>
     .badge.status-answered{ background:var(--accent); }
     .badge.status-no-answer{ background:var(--warn); }
     .badge.status-error{ background:var(--danger); }
-    .badge.status-online{ background:#0f766e; }
-    .badge.status-offline{ background:#64748b; }
-    .badge.status-unknown{ background:#475569; }
+    .badge.status-connected{ background:#15803d; }
+    .badge.status-disconnected{ background:#b91c1c; }
+    .badge.status-in-use{ background:#ca8a04; }
     .badge.status-in-call{ background:#1d4ed8; }
     .empty{
       color:var(--muted);
@@ -666,11 +659,13 @@ const callsDashboardHTML = `<!DOCTYPE html>
 
     function statusForContact(contact) {
       const state = String(contact.state || "").toLowerCase();
-      if (state === "in-call") return { label: "In Call", className: "status-in-call" };
-      if (state === "ringing" || state === "dialing" || state === "busy") return { label: state, className: "status-no-answer" };
-      if (state === "online" || state === "active") return { label: "Online", className: "status-online" };
-      if (state === "offline") return { label: "Offline", className: "status-offline" };
-      return { label: contact.state || "Unknown", className: "status-unknown" };
+      if (state === "in-call" || state === "in-use" || state === "in use" || state === "busy" || state === "ringing" || state === "dialing") {
+        return { label: "In Use", className: "status-in-use" };
+      }
+      if (state === "connected" || state === "not in use" || state === "online" || state === "active") {
+        return { label: "Connected", className: "status-connected" };
+      }
+      return { label: "Disconnected", className: "status-disconnected" };
     }
 
     function renderList(el, calls, emptyText, isHistory) {

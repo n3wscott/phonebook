@@ -310,6 +310,9 @@ func (s *Service) runAMIConnection(ctx context.Context, cfg AMIConfig) error {
 	if err := waitAMILogin(reader); err != nil {
 		return err
 	}
+	if err := writeAMIPJSIPShowEndpoints(conn); err != nil {
+		return err
+	}
 	s.logger.Info("AMI connected", "addr", cfg.Addr)
 
 	closeConn := make(chan struct{})
@@ -340,6 +343,11 @@ func writeAMILogin(conn net.Conn, cfg AMIConfig) error {
 		cfg.Password,
 	)
 	_, err := io.WriteString(conn, login)
+	return err
+}
+
+func writeAMIPJSIPShowEndpoints(conn net.Conn) error {
+	_, err := io.WriteString(conn, "Action: PJSIPShowEndpoints\r\n\r\n")
 	return err
 }
 
@@ -541,7 +549,7 @@ func (s *Service) HandleAMIEvent(event map[string]string) {
 			delete(s.active, call.ID)
 			changed = true
 		}
-	case "contactstatus", "endpointstatus", "devicestatechange", "peerstatus":
+	case "contactstatus", "endpointstatus", "devicestatechange", "peerstatus", "endpointlist":
 		if id, ok := presenceIDFor(event); ok {
 			state, detail := presenceStateFor(eventType, event)
 			prev, hasPrev := s.presence[id]
@@ -696,31 +704,37 @@ func cleanPresenceID(raw string) string {
 
 func presenceStateFor(eventType string, event map[string]string) (string, string) {
 	raw := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		eventValue(event, "DeviceState"),
 		eventValue(event, "Status"),
 		eventValue(event, "EndpointStatus"),
 		eventValue(event, "PeerStatus"),
 		eventValue(event, "State"),
 	)))
 	detail := strings.TrimSpace(firstNonEmpty(
+		eventValue(event, "ActiveChannels"),
 		eventValue(event, "Cause"),
 		eventValue(event, "SubEvent"),
 		eventValue(event, "URI"),
 		eventValue(event, "ContactStatus"),
 	))
+	if channelsRaw := strings.TrimSpace(eventValue(event, "ActiveChannels")); channelsRaw != "" {
+		if channels, err := strconv.Atoi(channelsRaw); err == nil && channels > 0 {
+			return "in-use", detail
+		}
+	}
 	if raw == "" {
 		raw = eventType
 	}
+	normalized := strings.NewReplacer(" ", "", "_", "", "-", "").Replace(raw)
 	switch {
-	case strings.Contains(raw, "inuse"), strings.Contains(raw, "busy"), strings.Contains(raw, "onhold"):
-		return "busy", detail
-	case strings.Contains(raw, "ring"), strings.Contains(raw, "dial"):
-		return "ringing", detail
-	case strings.Contains(raw, "reachable"), strings.Contains(raw, "online"), strings.Contains(raw, "registered"), strings.Contains(raw, "avail"), strings.Contains(raw, "ok"), strings.Contains(raw, "not_inuse"):
-		return "online", detail
-	case strings.Contains(raw, "unreachable"), strings.Contains(raw, "offline"), strings.Contains(raw, "unavailable"), strings.Contains(raw, "nonqualified"), strings.Contains(raw, "unknown"), strings.Contains(raw, "lagged"), strings.Contains(raw, "removed"):
-		return "offline", detail
+	case strings.Contains(normalized, "inuse"), strings.Contains(normalized, "busy"), strings.Contains(normalized, "onhold"), strings.Contains(normalized, "ring"), strings.Contains(normalized, "dial"):
+		return "in-use", detail
+	case strings.Contains(normalized, "notinuse"), strings.Contains(normalized, "reachable"), strings.Contains(normalized, "online"), strings.Contains(normalized, "registered"), strings.Contains(normalized, "avail"), strings.Contains(normalized, "ok"), strings.Contains(normalized, "ready"):
+		return "connected", detail
+	case strings.Contains(normalized, "unreachable"), strings.Contains(normalized, "offline"), strings.Contains(normalized, "unavailable"), strings.Contains(normalized, "nonqualified"), strings.Contains(normalized, "unknown"), strings.Contains(normalized, "lagged"), strings.Contains(normalized, "removed"), strings.Contains(normalized, "invalid"), strings.Contains(normalized, "failed"):
+		return "disconnected", detail
 	default:
-		return raw, detail
+		return "disconnected", detail
 	}
 }
 
@@ -809,7 +823,7 @@ func eventValue(event map[string]string, keys ...string) string {
 
 func isPresenceEvent(eventType string) bool {
 	switch strings.ToLower(strings.TrimSpace(eventType)) {
-	case "contactstatus", "endpointstatus", "devicestatechange", "peerstatus":
+	case "contactstatus", "endpointstatus", "devicestatechange", "peerstatus", "endpointlist":
 		return true
 	default:
 		return false

@@ -113,8 +113,8 @@ func TestHandleAMIEventPresenceContactStatus(t *testing.T) {
 	if snap.Presences[0].ID != "2601" {
 		t.Fatalf("expected presence id 2601, got %q", snap.Presences[0].ID)
 	}
-	if snap.Presences[0].State != "online" {
-		t.Fatalf("expected presence state online, got %q", snap.Presences[0].State)
+	if snap.Presences[0].State != "connected" {
+		t.Fatalf("expected presence state connected, got %q", snap.Presences[0].State)
 	}
 }
 
@@ -133,7 +133,25 @@ func TestHandleAMIEventPresenceDeviceState(t *testing.T) {
 	if snap.Presences[0].ID != "4027" {
 		t.Fatalf("expected presence id 4027, got %q", snap.Presences[0].ID)
 	}
-	if snap.Presences[0].State != "busy" {
-		t.Fatalf("expected presence state busy, got %q", snap.Presences[0].State)
+	if snap.Presences[0].State != "in-use" {
+		t.Fatalf("expected presence state in-use, got %q", snap.Presences[0].State)
+	}
+}
+
+func TestHandleAMIEventPresenceEndpointListUsesActiveChannels(t *testing.T) {
+	svc := NewService(Options{MaxHistory: 100, Retention: 7 * 24 * time.Hour}, testLogger{})
+	svc.HandleAMIEvent(map[string]string{
+		"Event":          "EndpointList",
+		"ObjectName":     "8081",
+		"DeviceState":    "Not in use",
+		"ActiveChannels": "1",
+	})
+
+	snap := svc.Snapshot()
+	if len(snap.Presences) != 1 {
+		t.Fatalf("expected 1 presence, got %d", len(snap.Presences))
+	}
+	if snap.Presences[0].State != "in-use" {
+		t.Fatalf("expected presence state in-use, got %q", snap.Presences[0].State)
 	}
 }
