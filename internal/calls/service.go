@@ -578,10 +578,23 @@ func notify(channels []chan struct{}) {
 }
 
 func linkedIDFor(event map[string]string) string {
-	return strings.TrimSpace(firstNonEmpty(
+	id := strings.TrimSpace(firstNonEmpty(
 		eventValue(event, "Linkedid", "LinkedID", "LinkedId"),
+		eventValue(event, "DestLinkedid", "DestLinkedID", "DestLinkedId"),
+		eventValue(event, "SrcLinkedid", "SrcLinkedID", "SrcLinkedId"),
 		eventValue(event, "Uniqueid", "UniqueID", "UniqueId"),
+		eventValue(event, "DestUniqueid", "DestUniqueID", "DestUniqueId"),
+		eventValue(event, "SrcUniqueid", "SrcUniqueID", "SrcUniqueId"),
 	))
+	if id != "" {
+		return id
+	}
+	channel := strings.TrimSpace(eventValue(event, "Channel", "DestChannel", "SrcChannel"))
+	if channel == "" {
+		return ""
+	}
+	// Final fallback for AMI events that do not carry linked/unique IDs.
+	return channel
 }
 
 func channelKey(event map[string]string) string {

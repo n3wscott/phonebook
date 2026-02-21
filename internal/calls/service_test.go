@@ -80,3 +80,19 @@ func TestHandleAMIEventDialSubEventBeginCreatesActive(t *testing.T) {
 		t.Fatalf("unexpected call parties: %+v", got)
 	}
 }
+
+func TestLinkedIDForFallsBackToDestinationFieldsAndChannel(t *testing.T) {
+	if got := linkedIDFor(map[string]string{
+		"Event":        "Dial",
+		"DestUniqueID": "dest-1",
+	}); got != "dest-1" {
+		t.Fatalf("expected dest unique id fallback, got %q", got)
+	}
+
+	if got := linkedIDFor(map[string]string{
+		"Event":   "BridgeEnter",
+		"Channel": "PJSIP/2601-00000010",
+	}); got != "PJSIP/2601-00000010" {
+		t.Fatalf("expected channel fallback, got %q", got)
+	}
+}
