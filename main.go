@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -114,7 +115,7 @@ func cmdServe(args []string) error {
 		AllowDebug:  level <= slog.LevelDebug,
 		CallService: callService,
 	}, logger)
-	server.Update(state.Contacts, state.Phonebook, state.LastUpdate)
+	server.UpdateProvision(state.Contacts, state.Phonebook, state.Provision, state.LastUpdate)
 
 	if flags.outDir != "" {
 		if err := writeOutputs(flags.outDir, state); err != nil {
@@ -134,7 +135,7 @@ func cmdServe(args []string) error {
 			logger.Warn("rebuild failed", "err", err)
 			return
 		}
-		server.Update(next.Contacts, next.Phonebook, next.LastUpdate)
+		server.UpdateProvision(next.Contacts, next.Phonebook, next.Provision, next.LastUpdate)
 		if flags.outDir != "" {
 			if err := writeOutputs(flags.outDir, next); err != nil {
 				logger.Warn("failed to write outputs", "err", err)
@@ -313,6 +314,22 @@ func writeOutputs(dir string, state project.State) error {
 	}
 	if err := atomicWrite(extensionsPath, state.Extensions, 0o644); err != nil {
 		return err
+	}
+	if len(state.Provision) > 0 {
+		provDir := filepath.Join(dir, "provisioning")
+		if err := os.MkdirAll(provDir, 0o755); err != nil {
+			return err
+		}
+		keys := make([]string, 0, len(state.Provision))
+		for name := range state.Provision {
+			keys = append(keys, name)
+		}
+		sort.Strings(keys)
+		for _, name := range keys {
+			if err := atomicWrite(filepath.Join(provDir, name), state.Provision[name], 0o644); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

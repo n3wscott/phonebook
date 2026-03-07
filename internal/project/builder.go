@@ -1,12 +1,14 @@
 package project
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/n3wscott/phonebook/internal/asterisk"
 	"github.com/n3wscott/phonebook/internal/config"
 	"github.com/n3wscott/phonebook/internal/load"
 	"github.com/n3wscott/phonebook/internal/model"
+	"github.com/n3wscott/phonebook/internal/provision"
 	"github.com/n3wscott/phonebook/internal/xmlgen"
 )
 
@@ -30,6 +32,7 @@ type State struct {
 	Phonebook  []byte
 	PJSIP      []byte
 	Extensions []byte
+	Provision  map[string][]byte
 	Files      []config.FileMeta
 	LastUpdate time.Time
 }
@@ -61,6 +64,28 @@ func (b *Builder) Build() (State, error) {
 		return State{}, err
 	}
 
+	provHost := globalString(cfg.Global, "provision_host", "cash-pbx.lan")
+	provPort := globalString(cfg.Global, "provision_port", defaultPortFromAddr(cfg.Server.Addr))
+	sipServer := globalString(cfg.Global, "provision_sip_server", provHost)
+	sipPort := globalString(cfg.Global, "provision_sip_port", "5060")
+	provisionHostPort := globalString(cfg.Global, "provision_hostport", hostPort(provHost, provPort))
+	provisionURL := globalString(cfg.Global, "provision_url", fmt.Sprintf("http://%s/prov/", provisionHostPort))
+	phonebookURL := globalString(cfg.Global, "provision_phonebook_url", fmt.Sprintf("http://%s%sphonebook.xml", provisionHostPort, cfg.Server.BasePath))
+	outboundProxy := globalString(cfg.Global, "provision_outbound_proxy", "")
+
+	provFiles, provMetas, err := provision.Build(b.Dir, provision.Options{
+		SIPServer:         sipServer,
+		SIPPort:           sipPort,
+		OutboundProxy:     outboundProxy,
+		PhonebookURL:      phonebookURL,
+		ProvisionURL:      provisionURL,
+		ProvisionHostport: provisionHostPort,
+	})
+	if err != nil {
+		return State{}, err
+	}
+	metas = append(metas, provMetas...)
+
 	last := latest(metas)
 
 	return State{
@@ -70,6 +95,7 @@ func (b *Builder) Build() (State, error) {
 		Phonebook:  xmlBytes,
 		PJSIP:      pjsipBytes,
 		Extensions: extensionsBytes,
+		Provision:  provFiles,
 		Files:      metas,
 		LastUpdate: last,
 	}, nil
@@ -83,4 +109,59 @@ func latest(files []config.FileMeta) time.Time {
 		}
 	}
 	return t
+}
+
+func globalString(m map[string]any, key, fallback string) string {
+	if m == nil {
+		return fallback
+	}
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return fallback
+	}
+	switch v := raw.(type) {
+	case string:
+		if v == "" {
+			return fallback
+		}
+		return v
+	case int:
+		return fmt.Sprintf("%d", v)
+	case int64:
+		return fmt.Sprintf("%d", v)
+	case float64:
+		return fmt.Sprintf("%.0f", v)
+	default:
+		return fallback
+	}
+}
+
+func defaultPortFromAddr(addr string) string {
+	if addr == "" {
+		return "8080"
+	}
+	if addr[0] == ':' {
+		return addr[1:]
+	}
+	idx := -1
+	for i := len(addr) - 1; i >= 0; i-- {
+		if addr[i] == ':' {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 || idx+1 >= len(addr) {
+		return "8080"
+	}
+	return addr[idx+1:]
+}
+
+func hostPort(host, port string) string {
+	if host == "" {
+		return ""
+	}
+	if port == "" || port == "80" || port == "443" {
+		return host
+	}
+	return host + ":" + port
 }
