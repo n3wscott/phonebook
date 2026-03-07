@@ -117,6 +117,28 @@ func TestProvisionEndpoint(t *testing.T) {
 	}
 }
 
+func TestProvisionEndpointCaseInsensitivePath(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	srv := NewServer(Config{Addr: ":0", BasePath: "/xml/", AllowDebug: false}, logger)
+	srv.UpdateProvision(
+		[]model.Contact{},
+		[]byte("<AddressBook></AddressBook>"),
+		map[string][]byte{"cfgec74d74bee8c.xml": []byte("<gs_provision/>")},
+		time.Unix(0, 0),
+	)
+
+	handler := srv.Handler()
+	req := httptest.NewRequest(http.MethodGet, "/prov/cfgEC74D74BEE8C.xml", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if got := rr.Body.String(); got != "<gs_provision/>" {
+		t.Fatalf("unexpected body: %q", got)
+	}
+}
+
 func TestTR069InformEndpoint(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	srv := NewServer(Config{Addr: ":0", BasePath: "/xml/", AllowDebug: false}, logger)

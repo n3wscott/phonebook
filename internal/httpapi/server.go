@@ -215,8 +215,11 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 	}
 	payload, ok := snap.Provision[name]
 	if !ok {
-		http.NotFound(w, r)
-		return
+		payload, ok = snap.Provision[strings.ToLower(name)]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
 	}
 
 	if strings.HasSuffix(strings.ToLower(name), ".xml") {
