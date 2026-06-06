@@ -269,11 +269,16 @@ func writeEndpointOptions(b *strings.Builder, m map[string]any) {
 	if val, ok := m["allow"]; ok {
 		writeKV(b, "allow", val)
 	}
-	for key, val := range m {
+	keys := make([]string, 0, len(m))
+	for key := range m {
 		if key == "allow" || key == "disallow" {
 			continue
 		}
-		writeKV(b, key, val)
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		writeKV(b, key, m[key])
 	}
 }
 
