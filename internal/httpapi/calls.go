@@ -49,10 +49,10 @@ func (s *Server) handleCallsPage(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "calls dashboard disabled", http.StatusServiceUnavailable)
 		return
 	}
-	wsPath := s.join("calls/ws")
-	activePath := s.join("api/calls/active")
-	historyPath := s.join("api/calls/history")
-	contactsPath := s.join("api/calls/contacts")
+	wsPath := "/calls/ws"
+	activePath := "/api/calls/active"
+	historyPath := "/api/calls/history"
+	contactsPath := "/api/calls/contacts"
 
 	page := fmt.Sprintf(callsDashboardHTML, wsPath, activePath, historyPath, contactsPath)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

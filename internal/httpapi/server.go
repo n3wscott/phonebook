@@ -98,11 +98,18 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc(s.join("prov/"), s.handleProvision)
 	}
 	if s.calls != nil {
-		mux.HandleFunc(s.join("calls"), s.handleCallsPage)
-		mux.HandleFunc(s.join("calls/ws"), s.handleCallsWS)
-		mux.HandleFunc(s.join("api/calls/active"), s.handleCallsActive)
-		mux.HandleFunc(s.join("api/calls/history"), s.handleCallsHistory)
-		mux.HandleFunc(s.join("api/calls/contacts"), s.handleCallsContacts)
+		mux.HandleFunc("/calls", s.handleCallsPage)
+		mux.HandleFunc("/calls/ws", s.handleCallsWS)
+		mux.HandleFunc("/api/calls/active", s.handleCallsActive)
+		mux.HandleFunc("/api/calls/history", s.handleCallsHistory)
+		mux.HandleFunc("/api/calls/contacts", s.handleCallsContacts)
+		if s.basePath != "/" {
+			mux.HandleFunc(s.join("calls"), s.handleCallsPage)
+			mux.HandleFunc(s.join("calls/ws"), s.handleCallsWS)
+			mux.HandleFunc(s.join("api/calls/active"), s.handleCallsActive)
+			mux.HandleFunc(s.join("api/calls/history"), s.handleCallsHistory)
+			mux.HandleFunc(s.join("api/calls/contacts"), s.handleCallsContacts)
+		}
 	}
 	if s.allowDebug {
 		mux.HandleFunc(s.join("debug"), s.handleDebug)
