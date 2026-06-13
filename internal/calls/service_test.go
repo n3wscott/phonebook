@@ -161,8 +161,7 @@ func TestHandleAMIEventPresenceEndpointListStatusOverridesIdleDeviceState(t *tes
 	svc.HandleAMIEvent(map[string]string{
 		"Event":          "EndpointList",
 		"ObjectName":     "edge-in",
-		"Status":         "Unavailable",
-		"DeviceState":    "Not in use",
+		"DeviceState":    "Unavailable",
 		"ActiveChannels": "0",
 	})
 

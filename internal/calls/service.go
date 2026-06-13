@@ -762,10 +762,10 @@ func presenceStateFor(eventType string, event map[string]string) (string, string
 	switch {
 	case strings.Contains(normalized, "inuse"), strings.Contains(normalized, "busy"), strings.Contains(normalized, "onhold"), strings.Contains(normalized, "ring"), strings.Contains(normalized, "dial"):
 		return "in-use", detail
+	case isDisconnectedPresenceValue(raw):
+		return "disconnected", disconnectedPresenceDetail(raw, detail)
 	case strings.Contains(normalized, "notinuse"), strings.Contains(normalized, "reachable"), strings.Contains(normalized, "online"), strings.Contains(normalized, "registered"), strings.Contains(normalized, "avail"), strings.Contains(normalized, "ok"), strings.Contains(normalized, "ready"):
 		return "connected", detail
-	case strings.Contains(normalized, "unreachable"), strings.Contains(normalized, "offline"), strings.Contains(normalized, "unavailable"), strings.Contains(normalized, "nonqualified"), strings.Contains(normalized, "unknown"), strings.Contains(normalized, "lagged"), strings.Contains(normalized, "removed"), strings.Contains(normalized, "invalid"), strings.Contains(normalized, "failed"):
-		return "disconnected", detail
 	default:
 		return "disconnected", detail
 	}
@@ -782,6 +782,13 @@ func isDisconnectedPresenceValue(raw string) bool {
 		strings.Contains(normalized, "removed") ||
 		strings.Contains(normalized, "invalid") ||
 		strings.Contains(normalized, "failed")
+}
+
+func disconnectedPresenceDetail(raw, detail string) string {
+	if strings.TrimSpace(detail) == "" || strings.TrimSpace(detail) == "0" {
+		return strings.TrimSpace(raw)
+	}
+	return detail
 }
 
 func normalizePresenceValue(raw string) string {
