@@ -150,9 +150,16 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 	nameLookup := buildNameLookup(phonebookSnapshot.Contacts)
 
 	active := make([]dashboardCall, 0, len(callSnapshot.Active))
+	activeRawIDs := make(map[string]struct{}, len(callSnapshot.Active)*2)
 	for _, call := range callSnapshot.Active {
 		fromParty := canonicalParty(call.From)
 		toParty := canonicalParty(call.To)
+		if fromParty != "" {
+			activeRawIDs[fromParty] = struct{}{}
+		}
+		if toParty != "" {
+			activeRawIDs[toParty] = struct{}{}
+		}
 		active = append(active, dashboardCall{
 			ID:          call.ID,
 			From:        fromParty,
@@ -225,6 +232,15 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 		}
 	}
 
+	activeContactIDs := make(map[string]struct{}, len(activeRawIDs))
+	for id := range activeRawIDs {
+		targetID := id
+		if mappedID, ok := aliasToID[id]; ok {
+			targetID = mappedID
+		}
+		activeContactIDs[targetID] = struct{}{}
+	}
+
 	for _, p := range callSnapshot.Presences {
 		id := canonicalParty(p.ID)
 		if id == "" {
@@ -239,14 +255,34 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 		if name == "" {
 			name = resolveName(nameLookup, targetID)
 		}
+		_, activeNow := activeContactIDs[targetID]
 		contactByID[targetID] = dashboardContact{
 			ID:      targetID,
 			Name:    name,
-			State:   p.State,
+			State:   dashboardContactState(p.State, activeNow),
 			Detail:  p.Detail,
 			Updated: p.Updated,
 			Known:   current.Known,
 		}
+	}
+	for id := range activeContactIDs {
+		current := contactByID[id]
+		if current.ID == "" {
+			name := resolveName(nameLookup, id)
+			if name == "" {
+				name = id
+			}
+			current = dashboardContact{
+				ID:    id,
+				Name:  name,
+				Known: false,
+			}
+		}
+		current.State = "in-call"
+		if current.Detail == "" || current.Detail == "no endpoint presence yet" {
+			current.Detail = "active call"
+		}
+		contactByID[id] = current
 	}
 	contacts := make([]dashboardContact, 0, len(contactByID))
 	for _, c := range contactByID {
@@ -275,11 +311,25 @@ func (s *Server) buildCallsPayload() dashboardPayload {
 	}
 }
 
+func dashboardContactState(state string, active bool) string {
+	if active {
+		return "in-call"
+	}
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "connected", "not in use", "online", "active", "in-use", "in use", "busy", "ringing", "dialing":
+		return "connected"
+	case "disconnected", "offline", "unknown", "":
+		return "disconnected"
+	default:
+		return strings.ToLower(strings.TrimSpace(state))
+	}
+}
+
 func contactStateWeight(state string) int {
 	switch strings.ToLower(strings.TrimSpace(state)) {
-	case "in-use", "in use", "in-call":
+	case "in-call":
 		return 0
-	case "connected", "not in use", "online", "active":
+	case "connected", "not in use", "online", "active", "in-use", "in use", "busy", "ringing", "dialing":
 		return 1
 	case "disconnected", "offline", "unknown":
 		return 2
@@ -631,10 +681,10 @@ const callsDashboardHTML = `<!DOCTYPE html>
 
     function statusForContact(contact) {
       const state = String(contact.state || "").toLowerCase();
-      if (state === "in-call" || state === "in-use" || state === "in use" || state === "busy" || state === "ringing" || state === "dialing") {
+      if (state === "in-call") {
         return { label: "In Use", className: "status-in-use" };
       }
-      if (state === "connected" || state === "not in use" || state === "online" || state === "active") {
+      if (state === "connected" || state === "not in use" || state === "online" || state === "active" || state === "in-use" || state === "in use" || state === "busy" || state === "ringing" || state === "dialing") {
         return { label: "Connected", className: "status-connected" };
       }
       return { label: "Disconnected", className: "status-disconnected" };

@@ -40,3 +40,45 @@ func TestBuildNameLookupUsesFirstAndLastName(t *testing.T) {
 		t.Fatalf("expected empty name for contact with no first/last, got %q", got)
 	}
 }
+
+func TestDashboardContactStateOnlyShowsInUseForActiveCalls(t *testing.T) {
+	tests := []struct {
+		name   string
+		state  string
+		active bool
+		want   string
+	}{
+		{
+			name:   "raw in-use presence without active call is connected",
+			state:  "in-use",
+			active: false,
+			want:   "connected",
+		},
+		{
+			name:   "raw ringing presence without active call is connected",
+			state:  "ringing",
+			active: false,
+			want:   "connected",
+		},
+		{
+			name:   "active call is in-call",
+			state:  "connected",
+			active: true,
+			want:   "in-call",
+		},
+		{
+			name:   "offline remains disconnected",
+			state:  "offline",
+			active: false,
+			want:   "disconnected",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := dashboardContactState(tt.state, tt.active); got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
