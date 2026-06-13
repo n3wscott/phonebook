@@ -76,7 +76,7 @@ func TestRenderExtensionsWithApplication(t *testing.T) {
 		Extension: "5653",
 		Steps: []string{
 			"Answer()",
-			"AGI(/usr/local/libexec/madrona-pbx/jokes agi)",
+			"AGI(/usr/local/libexec/madrona-pbx/jokes,agi)",
 			"Hangup()",
 		},
 	}}
@@ -97,7 +97,7 @@ func TestRenderExtensionsWithApplication(t *testing.T) {
 exten => 101,1,Dial(PJSIP/101)
 exten => 102,1,Dial(PJSIP/102)
 exten => 5653,1,Answer()
- same => n,AGI(/usr/local/libexec/madrona-pbx/jokes agi)
+ same => n,AGI(/usr/local/libexec/madrona-pbx/jokes,agi)
  same => n,Hangup()
 
 `
