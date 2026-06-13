@@ -97,6 +97,9 @@ func RenderPJSIP(cfg config.Config, contacts []model.Contact) ([]byte, error) {
 	}
 
 	for _, c := range contacts {
+		if c.PhonebookOnly {
+			continue
+		}
 		fmt.Fprintf(&b, "\n; Auth & AOR for extension %s\n", c.Extension)
 		writeInheritedSection(&b, c.Extension, c.Endpoint.Template, func() {
 			writeKV(&b, "type", "endpoint")
@@ -199,6 +202,9 @@ func RenderExtensions(cfg config.Config, contacts []model.Contact) ([]byte, erro
 			fmt.Fprintf(&b, "include => %s\n", include)
 		}
 		for _, c := range contacts {
+			if c.PhonebookOnly {
+				continue
+			}
 			fmt.Fprintf(&b, "exten => %s,1,Dial(PJSIP/%s)\n", c.Extension, c.Extension)
 		}
 		for _, conference := range conferenceByContext[mainContext] {

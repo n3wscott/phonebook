@@ -165,18 +165,19 @@ func parseContacts(data []byte) ([]rawContact, error) {
 }
 
 type rawContact struct {
-	ID           string      `yaml:"id"`
-	FirstName    string      `yaml:"first_name"`
-	LastName     string      `yaml:"last_name"`
-	Ext          string      `yaml:"ext"`
-	Password     string      `yaml:"password"`
-	AccountIndex *int        `yaml:"account_index"`
-	GroupID      *int        `yaml:"group_id"`
-	Nickname     string      `yaml:"nickname"`
-	Phones       []rawPhone  `yaml:"phones"`
-	Auth         rawAuth     `yaml:"auth"`
-	AOR          rawAOR      `yaml:"aor"`
-	Endpoint     rawEndpoint `yaml:"endpoint"`
+	ID            string      `yaml:"id"`
+	FirstName     string      `yaml:"first_name"`
+	LastName      string      `yaml:"last_name"`
+	Ext           string      `yaml:"ext"`
+	Password      string      `yaml:"password"`
+	AccountIndex  *int        `yaml:"account_index"`
+	GroupID       *int        `yaml:"group_id"`
+	Nickname      string      `yaml:"nickname"`
+	PhonebookOnly bool        `yaml:"phonebook_only"`
+	Phones        []rawPhone  `yaml:"phones"`
+	Auth          rawAuth     `yaml:"auth"`
+	AOR           rawAOR      `yaml:"aor"`
+	Endpoint      rawEndpoint `yaml:"endpoint"`
 }
 
 type rawPhone struct {
@@ -204,7 +205,7 @@ func (rc rawContact) Normalize(fd fileDescriptor, defs config.Defaults, template
 		return model.Contact{}, errors.New("contact missing ext")
 	}
 	password := strings.TrimSpace(rc.Password)
-	if password == "" {
+	if password == "" && !rc.PhonebookOnly {
 		return model.Contact{}, fmt.Errorf("contact %s missing password", ext)
 	}
 	first := strings.TrimSpace(rc.FirstName)
@@ -231,49 +232,55 @@ func (rc rawContact) Normalize(fd fileDescriptor, defs config.Defaults, template
 		return model.Contact{}, err
 	}
 
-	username := ext
-	if rc.Auth.Username != nil {
-		username = strings.TrimSpace(*rc.Auth.Username)
-	} else if !defs.Auth.UsernameEqualsExt {
-		return model.Contact{}, fmt.Errorf("contact %s missing auth.username and defaults.username_equals_ext=false", ext)
-	}
-	if username == "" {
-		return model.Contact{}, fmt.Errorf("contact %s has empty auth username", ext)
-	}
+	var username string
+	var aor model.ContactAOR
+	var template string
+	if !rc.PhonebookOnly {
+		username = ext
+		if rc.Auth.Username != nil {
+			username = strings.TrimSpace(*rc.Auth.Username)
+		} else if !defs.Auth.UsernameEqualsExt {
+			return model.Contact{}, fmt.Errorf("contact %s missing auth.username and defaults.username_equals_ext=false", ext)
+		}
+		if username == "" {
+			return model.Contact{}, fmt.Errorf("contact %s has empty auth username", ext)
+		}
 
-	aor := model.ContactAOR{
-		MaxContacts:      defs.AOR.MaxContacts,
-		RemoveExisting:   defs.AOR.RemoveExisting,
-		QualifyFrequency: defs.AOR.QualifyFrequency,
-	}
-	if rc.AOR.MaxContacts != nil {
-		aor.MaxContacts = *rc.AOR.MaxContacts
-	}
-	if rc.AOR.RemoveExisting != nil {
-		aor.RemoveExisting = *rc.AOR.RemoveExisting
-	}
-	if rc.AOR.QualifyFrequency != nil {
-		aor.QualifyFrequency = *rc.AOR.QualifyFrequency
-	}
+		aor = model.ContactAOR{
+			MaxContacts:      defs.AOR.MaxContacts,
+			RemoveExisting:   defs.AOR.RemoveExisting,
+			QualifyFrequency: defs.AOR.QualifyFrequency,
+		}
+		if rc.AOR.MaxContacts != nil {
+			aor.MaxContacts = *rc.AOR.MaxContacts
+		}
+		if rc.AOR.RemoveExisting != nil {
+			aor.RemoveExisting = *rc.AOR.RemoveExisting
+		}
+		if rc.AOR.QualifyFrequency != nil {
+			aor.QualifyFrequency = *rc.AOR.QualifyFrequency
+		}
 
-	template := strings.TrimSpace(rc.Endpoint.Template)
-	if template == "" {
-		template = defs.Endpoint.Template
-	}
-	if _, ok := templates[template]; !ok {
-		return model.Contact{}, fmt.Errorf("contact %s references unknown endpoint template %q", ext, template)
+		template = strings.TrimSpace(rc.Endpoint.Template)
+		if template == "" {
+			template = defs.Endpoint.Template
+		}
+		if _, ok := templates[template]; !ok {
+			return model.Contact{}, fmt.Errorf("contact %s references unknown endpoint template %q", ext, template)
+		}
 	}
 
 	return model.Contact{
-		ID:           strings.TrimSpace(rc.ID),
-		FirstName:    first,
-		LastName:     last,
-		Extension:    ext,
-		Password:     password,
-		GroupID:      group,
-		AccountIndex: rc.AccountIndex,
-		Phones:       phones,
-		Nickname:     strings.TrimSpace(rc.Nickname),
+		ID:            strings.TrimSpace(rc.ID),
+		FirstName:     first,
+		LastName:      last,
+		Extension:     ext,
+		Password:      password,
+		GroupID:       group,
+		AccountIndex:  rc.AccountIndex,
+		Phones:        phones,
+		Nickname:      strings.TrimSpace(rc.Nickname),
+		PhonebookOnly: rc.PhonebookOnly,
 		Auth: model.ContactAuth{
 			Username: username,
 			Password: password,

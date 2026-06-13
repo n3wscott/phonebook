@@ -28,15 +28,16 @@ type ContactEndpoint struct {
 
 // Contact is the normalized representation of a user/extension.
 type Contact struct {
-	ID           string
-	FirstName    string
-	LastName     string
-	Extension    string
-	Password     string
-	GroupID      *int
-	AccountIndex *int
-	Phones       []Phone
-	Nickname     string
+	ID            string
+	FirstName     string
+	LastName      string
+	Extension     string
+	Password      string
+	GroupID       *int
+	AccountIndex  *int
+	Phones        []Phone
+	Nickname      string
+	PhonebookOnly bool
 
 	Auth     ContactAuth
 	AOR      ContactAOR

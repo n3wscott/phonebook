@@ -3,6 +3,7 @@ package asterisk
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/n3wscott/phonebook/internal/config"
@@ -69,6 +70,38 @@ exten => _X.,1,NoOp(Incoming SIP MESSAGE)
 	}
 }
 
+func TestPhonebookOnlyContactDoesNotRenderPJSIPOrDialplan(t *testing.T) {
+	cfg := sampleConfig()
+	cfg.Dialplan.Conferences = []config.Conference{{Extension: "2600", Room: "2600", Context: "conferences"}}
+	contacts := append(sampleContacts(), model.Contact{
+		ID:            "hangout",
+		FirstName:     "Hangout",
+		Extension:     "2600",
+		PhonebookOnly: true,
+		Phones:        []model.Phone{{Number: "2600", AccountIndex: 1}},
+	})
+
+	pjsip, err := RenderPJSIP(cfg, contacts)
+	if err != nil {
+		t.Fatalf("RenderPJSIP() error = %v", err)
+	}
+	if got := string(pjsip); contains(got, "[2600]") || contains(got, "Auth & AOR for extension 2600") {
+		t.Fatalf("phonebook-only contact should not render PJSIP sections:\n%s", got)
+	}
+
+	extensions, err := RenderExtensions(cfg, contacts)
+	if err != nil {
+		t.Fatalf("RenderExtensions() error = %v", err)
+	}
+	got := string(extensions)
+	if contains(got, "Dial(PJSIP/2600)") {
+		t.Fatalf("phonebook-only contact should not render direct dialplan:\n%s", got)
+	}
+	if !contains(got, "ConfBridge(2600)") {
+		t.Fatalf("conference extension should still render:\n%s", got)
+	}
+}
+
 func sampleConfig() config.Config {
 	return config.Config{
 		Global: map[string]any{"user_agent": "Asterisk"},
@@ -93,6 +126,10 @@ func sampleConfig() config.Config {
 		},
 		Dialplan: config.Dialplan{Context: "internal"},
 	}
+}
+
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }
 
 func sampleContacts() []model.Contact {

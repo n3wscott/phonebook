@@ -32,10 +32,15 @@ contacts:
       username: "101"
     aor:
       max_contacts: 1
+  - id: "hangout"
+    first_name: "Hangout"
+    ext: "2600"
+    phonebook_only: true     # XML phonebook only; no SIP auth/AOR is rendered
 ```
 
 Validation highlights:
-- `ext`/`password` required; duplicates are allowed but last writer wins (with a warning).
+- `ext`/`password` required for SIP contacts; `phonebook_only: true` entries require only `ext` and a name and are omitted from generated SIP auth/AOR and direct-dial dialplan output.
+- Duplicates are allowed but last writer wins (with a warning).
 - Phone numbers may only contain digits plus `+ * # ,` (spaces are stripped).
 - `account_index` ∈ `[1,6]`, `group_id` ∈ `[0,9]`.
 - `auth.username` defaults to `ext` when `defaults.yaml` sets `username_equals_ext: true`.

@@ -80,6 +80,35 @@ func TestLoaderDedupLastWins(t *testing.T) {
 	}
 }
 
+func TestLoaderParsesPhonebookOnlyContactWithoutPassword(t *testing.T) {
+	root := t.TempDir()
+	writeContactFile(t, root, "contacts/rooms.yaml", `contacts:
+  - id: hangout
+    first_name: Hangout
+    ext: "2600"
+    phonebook_only: true
+`)
+	cfg, defs := testConfig()
+	loader := load.New(root, testutil.NewTestLogger())
+	res, err := loader.LoadContacts(cfg, defs)
+	if err != nil {
+		t.Fatalf("LoadContacts() error = %v", err)
+	}
+	if len(res.Contacts) != 1 {
+		t.Fatalf("expected 1 contact, got %d", len(res.Contacts))
+	}
+	contact := res.Contacts[0]
+	if !contact.PhonebookOnly {
+		t.Fatalf("expected phonebook-only contact: %+v", contact)
+	}
+	if contact.Auth.Username != "" || contact.Auth.Password != "" {
+		t.Fatalf("phonebook-only contact should not have auth: %+v", contact.Auth)
+	}
+	if got := contact.Phones[0].Number; got != "2600" {
+		t.Fatalf("expected phonebook number 2600, got %s", got)
+	}
+}
+
 func TestLoaderSkipsInvalid(t *testing.T) {
 	root := t.TempDir()
 	writeContactFile(t, root, "contacts/users.yaml", `contacts:
