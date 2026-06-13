@@ -26,6 +26,7 @@ type Server struct {
 	allowDebug bool
 	logger     Logger
 	calls      *calls.Service
+	broadcast  BroadcastConfig
 
 	mu       sync.RWMutex
 	snapshot snapshot
@@ -49,6 +50,27 @@ type Config struct {
 	TLSKey      string
 	AllowDebug  bool
 	CallService *calls.Service
+	Broadcast   BroadcastConfig
+}
+
+// MessageSender sends one SIP MESSAGE.
+type MessageSender interface {
+	SendMessage(ctx context.Context, msg calls.Message) error
+}
+
+// MessageSenderFunc adapts a function into a MessageSender.
+type MessageSenderFunc func(ctx context.Context, msg calls.Message) error
+
+func (f MessageSenderFunc) SendMessage(ctx context.Context, msg calls.Message) error {
+	return f(ctx, msg)
+}
+
+// BroadcastConfig controls the web broadcast page and send API.
+type BroadcastConfig struct {
+	Enabled  bool
+	From     string
+	MaxChars int
+	Sender   MessageSender
 }
 
 // snapshot contains the data served to clients.
@@ -79,6 +101,7 @@ func New(cfg Config, logger Logger) *Server {
 		allowDebug: cfg.AllowDebug,
 		logger:     logger,
 		calls:      cfg.CallService,
+		broadcast:  cfg.Broadcast,
 	}
 }
 
@@ -109,6 +132,16 @@ func (s *Server) Handler() http.Handler {
 			mux.HandleFunc(s.join("api/calls/active"), s.handleCallsActive)
 			mux.HandleFunc(s.join("api/calls/history"), s.handleCallsHistory)
 			mux.HandleFunc(s.join("api/calls/contacts"), s.handleCallsContacts)
+		}
+	}
+	if s.broadcast.Enabled {
+		mux.HandleFunc("/broadcast", s.handleBroadcastPage)
+		mux.HandleFunc("/api/broadcast/contacts", s.handleBroadcastContacts)
+		mux.HandleFunc("/api/broadcast/send", s.handleBroadcastSend)
+		if s.basePath != "/" {
+			mux.HandleFunc(s.join("broadcast"), s.handleBroadcastPage)
+			mux.HandleFunc(s.join("api/broadcast/contacts"), s.handleBroadcastContacts)
+			mux.HandleFunc(s.join("api/broadcast/send"), s.handleBroadcastSend)
 		}
 	}
 	if s.allowDebug {

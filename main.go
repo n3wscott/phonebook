@@ -61,6 +61,10 @@ type serveFlags struct {
 	amiUser  string
 	amiPass  string
 	cdrCSV   string
+
+	broadcastEnabled  bool
+	broadcastFrom     string
+	broadcastMaxChars int
 }
 
 func cmdServe(args []string) error {
@@ -107,6 +111,20 @@ func cmdServe(args []string) error {
 		logger.Warn("AMI listener disabled; set --ami-user and --ami-pass to enable live call tracking")
 	}
 
+	var broadcastSender httpapi.MessageSender
+	if flags.broadcastEnabled && flags.amiUser != "" && flags.amiPass != "" {
+		amiCfg := calls.AMIConfig{
+			Addr:     flags.amiAddr,
+			Username: flags.amiUser,
+			Password: flags.amiPass,
+		}
+		broadcastSender = httpapi.MessageSenderFunc(func(ctx context.Context, msg calls.Message) error {
+			return calls.SendAMIMessage(ctx, amiCfg, msg)
+		})
+	} else if flags.broadcastEnabled {
+		logger.Warn("broadcast send disabled; set --ami-user and --ami-pass to enable AMI MessageSend")
+	}
+
 	server := httpapi.NewServer(httpapi.Config{
 		Addr:        addr,
 		BasePath:    basePath,
@@ -114,6 +132,12 @@ func cmdServe(args []string) error {
 		TLSKey:      flags.tlsKey,
 		AllowDebug:  level <= slog.LevelDebug,
 		CallService: callService,
+		Broadcast: httpapi.BroadcastConfig{
+			Enabled:  flags.broadcastEnabled,
+			From:     flags.broadcastFrom,
+			MaxChars: flags.broadcastMaxChars,
+			Sender:   broadcastSender,
+		},
 	}, logger)
 	server.UpdateProvision(state.Contacts, state.Phonebook, state.Provision, state.LastUpdate)
 
@@ -266,6 +290,9 @@ func parseServeFlags(args []string) (serveFlags, error) {
 	fs.StringVar(&flags.amiUser, "ami-user", getenv("PHONEBOOK_AMI_USER", ""), "Asterisk AMI username")
 	fs.StringVar(&flags.amiPass, "ami-pass", getenv("PHONEBOOK_AMI_PASS", ""), "Asterisk AMI password")
 	fs.StringVar(&flags.cdrCSV, "cdr-csv", getenv("PHONEBOOK_CDR_CSV", "/var/log/asterisk/cdr-csv/Master.csv"), "CDR CSV path for startup history bootstrap")
+	fs.BoolVar(&flags.broadcastEnabled, "broadcast", getenvBool("PHONEBOOK_BROADCAST_ENABLED", false), "enable the broadcast web page and API")
+	fs.StringVar(&flags.broadcastFrom, "broadcast-from", getenv("PHONEBOOK_BROADCAST_FROM", "Operator <sip:operator@localhost>"), "From header for broadcast SIP MESSAGEs")
+	fs.IntVar(&flags.broadcastMaxChars, "broadcast-max-chars", getenvInt("PHONEBOOK_BROADCAST_MAX_CHARS", 900), "maximum broadcast message characters")
 	if err := fs.Parse(args); err != nil {
 		return flags, err
 	}
@@ -385,4 +412,31 @@ func getenv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+func getenvBool(key string, fallback bool) bool {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func getenvInt(key string, fallback int) int {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	var out int
+	if _, err := fmt.Sscanf(strings.TrimSpace(val), "%d", &out); err != nil || out <= 0 {
+		return fallback
+	}
+	return out
 }

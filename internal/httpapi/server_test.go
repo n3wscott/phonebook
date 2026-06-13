@@ -215,3 +215,37 @@ func TestCallsEndpointsAreRootMountedWithBasePathCompatibility(t *testing.T) {
 		t.Fatalf("calls page should use root-mounted API paths, got body: %s", body)
 	}
 }
+
+func TestBroadcastEndpointsAreRootMountedWithBasePathCompatibility(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	srv := NewServer(Config{
+		Addr:     ":0",
+		BasePath: "/xml/",
+		Broadcast: BroadcastConfig{
+			Enabled: true,
+		},
+	}, logger)
+	srv.Update([]model.Contact{}, []byte("<AddressBook></AddressBook>"), time.Unix(0, 0))
+
+	handler := srv.Handler()
+	for _, path := range []string{
+		"/broadcast",
+		"/api/broadcast/contacts",
+		"/xml/broadcast",
+		"/xml/api/broadcast/contacts",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d", path, rr.Code)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/broadcast", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if body := rr.Body.String(); !strings.Contains(body, `"/api/broadcast/contacts"`) || strings.Contains(body, `"/xml/api/broadcast/contacts"`) {
+		t.Fatalf("broadcast page should use root-mounted API paths, got body: %s", body)
+	}
+}

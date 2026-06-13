@@ -81,6 +81,9 @@ go build -o phonebook .
 - `${basePath}/calls/ws` - WebSocket stream for live call updates
 - `${basePath}/api/calls/active` - JSON active calls
 - `${basePath}/api/calls/history` - JSON historical calls
+- `/broadcast` - optional HTML page for sending a SIP MESSAGE broadcast to selected contacts
+- `/api/broadcast/contacts` - optional JSON broadcast contact list with presence state
+- `/api/broadcast/send` - optional POST endpoint for sending broadcast SIP MESSAGEs
 
 Point Grandstream phones at `http://HOST:PORT/<base-path>/` and they will fetch `<base-path>/phonebook.xml`.
 
@@ -114,6 +117,11 @@ phonebook serve --dir /path/to/data \
 Notes:
 - Without AMI credentials, `/calls` still loads but only shows CDR bootstrap history.
 - History retention is capped to last `100` calls and last `7` days.
+- Broadcast is disabled by default. Enable it with `--broadcast` or `PHONEBOOK_BROADCAST_ENABLED=true`.
+- Broadcast sends through AMI `MessageSend`, so the AMI user needs the `message` privilege.
+- Broadcast recipients are restricted to loaded, non-hidden SIP contacts. Requests cannot send to arbitrary destinations.
+- Configure the SIP `From:` identity with `--broadcast-from` or `PHONEBOOK_BROADCAST_FROM`.
+- The message length limit defaults to 900 characters and can be changed with `--broadcast-max-chars` or `PHONEBOOK_BROADCAST_MAX_CHARS`.
 
 ## Development
 

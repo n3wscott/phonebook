@@ -3,6 +3,7 @@ package calls
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -36,6 +37,14 @@ type AMIConfig struct {
 	Password       string
 	ConnectTimeout time.Duration
 	ReconnectDelay time.Duration
+}
+
+// Message describes an out-of-call SIP MESSAGE sent through AMI MessageSend.
+type Message struct {
+	Destination string
+	To          string
+	From        string
+	Body        string
 }
 
 // Call represents an active call.
@@ -368,6 +377,113 @@ func writeAMILogin(conn net.Conn, cfg AMIConfig) error {
 	)
 	_, err := io.WriteString(conn, login)
 	return err
+}
+
+// SendAMIMessage sends one out-of-call message using a short-lived AMI
+// connection. The caller should validate recipients before calling this.
+func SendAMIMessage(ctx context.Context, cfg AMIConfig, msg Message) error {
+	if cfg.Addr == "" {
+		return errors.New("AMI address is required")
+	}
+	if cfg.Username == "" || cfg.Password == "" {
+		return errors.New("AMI username and password are required")
+	}
+	if cfg.ConnectTimeout <= 0 {
+		cfg.ConnectTimeout = 5 * time.Second
+	}
+	if strings.TrimSpace(msg.Destination) == "" {
+		return errors.New("message destination is required")
+	}
+	if strings.TrimSpace(msg.From) == "" {
+		return errors.New("message from is required")
+	}
+	if strings.TrimSpace(msg.Body) == "" {
+		return errors.New("message body is required")
+	}
+	for label, value := range map[string]string{
+		"destination": msg.Destination,
+		"to":          msg.To,
+		"from":        msg.From,
+	} {
+		if strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("message %s contains newline", label)
+		}
+	}
+
+	dialer := net.Dialer{Timeout: cfg.ConnectTimeout}
+	conn, err := dialer.DialContext(ctx, "tcp", cfg.Addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
+	if _, err := reader.ReadString('\n'); err != nil {
+		return err
+	}
+	if err := writeAMILoginEventsOff(conn, cfg); err != nil {
+		return err
+	}
+	if err := waitAMILogin(reader); err != nil {
+		return err
+	}
+	actionID := fmt.Sprintf("phonebook-broadcast-%d", time.Now().UnixNano())
+	if err := writeAMIMessageSend(conn, actionID, msg); err != nil {
+		return err
+	}
+	if err := waitAMIActionResponse(reader, actionID); err != nil {
+		return err
+	}
+	_, _ = io.WriteString(conn, "Action: Logoff\r\n\r\n")
+	return nil
+}
+
+func writeAMILoginEventsOff(conn net.Conn, cfg AMIConfig) error {
+	login := fmt.Sprintf(
+		"Action: Login\r\nUsername: %s\r\nSecret: %s\r\nEvents: off\r\n\r\n",
+		cfg.Username,
+		cfg.Password,
+	)
+	_, err := io.WriteString(conn, login)
+	return err
+}
+
+func writeAMIMessageSend(w io.Writer, actionID string, msg Message) error {
+	body := base64.StdEncoding.EncodeToString([]byte(msg.Body))
+	var b strings.Builder
+	fmt.Fprintf(&b, "Action: MessageSend\r\nActionID: %s\r\nDestination: %s\r\nFrom: %s\r\nBase64Body: %s\r\n",
+		actionID,
+		strings.TrimSpace(msg.Destination),
+		strings.TrimSpace(msg.From),
+		body,
+	)
+	if to := strings.TrimSpace(msg.To); to != "" {
+		fmt.Fprintf(&b, "To: %s\r\n", to)
+	}
+	b.WriteString("\r\n")
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+func waitAMIActionResponse(reader *bufio.Reader, actionID string) error {
+	for {
+		msg, err := readAMIMessage(reader)
+		if err != nil {
+			return err
+		}
+		if actionID != "" && msg["ActionID"] != "" && msg["ActionID"] != actionID {
+			continue
+		}
+		if resp := msg["Response"]; resp != "" {
+			if strings.EqualFold(resp, "Success") {
+				return nil
+			}
+			if msg["Message"] != "" {
+				return fmt.Errorf("AMI action failed: %s", msg["Message"])
+			}
+			return fmt.Errorf("AMI action failed: %s", resp)
+		}
+	}
 }
 
 func writeAMIPJSIPShowEndpoints(conn net.Conn) error {
