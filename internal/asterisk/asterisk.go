@@ -147,8 +147,19 @@ func RenderExtensions(cfg config.Config, contacts []model.Contact) ([]byte, erro
 	}
 
 	conferenceByContext := map[string][]config.Conference{}
-	conferenceContextOrder := []string{}
-	seenConferenceContext := map[string]struct{}{}
+	applicationByContext := map[string][]config.Application{}
+	dialplanContextOrder := []string{}
+	seenDialplanContext := map[string]struct{}{}
+	addDialplanContext := func(ctx string) {
+		if ctx == "" {
+			return
+		}
+		if _, ok := seenDialplanContext[ctx]; ok {
+			return
+		}
+		seenDialplanContext[ctx] = struct{}{}
+		dialplanContextOrder = append(dialplanContextOrder, ctx)
+	}
 	for _, conference := range cfg.Dialplan.Conferences {
 		ctx := conference.Context
 		if ctx == "" {
@@ -158,11 +169,24 @@ func RenderExtensions(cfg config.Config, contacts []model.Contact) ([]byte, erro
 			conference.Room = conference.Extension
 		}
 		conference.Context = ctx
-		if _, ok := seenConferenceContext[ctx]; !ok {
-			seenConferenceContext[ctx] = struct{}{}
-			conferenceContextOrder = append(conferenceContextOrder, ctx)
-		}
+		addDialplanContext(ctx)
 		conferenceByContext[ctx] = append(conferenceByContext[ctx], conference)
+	}
+	for _, application := range cfg.Dialplan.Applications {
+		application.Extension = strings.TrimSpace(application.Extension)
+		if application.Extension == "" {
+			return nil, fmt.Errorf("dialplan application missing extension")
+		}
+		if len(application.Steps) == 0 {
+			return nil, fmt.Errorf("dialplan application %s missing steps", application.Extension)
+		}
+		ctx := application.Context
+		if ctx == "" {
+			ctx = mainContext
+		}
+		application.Context = ctx
+		addDialplanContext(ctx)
+		applicationByContext[ctx] = append(applicationByContext[ctx], application)
 	}
 
 	messageContext := cfg.Dialplan.Messages.Context
@@ -190,7 +214,7 @@ func RenderExtensions(cfg config.Config, contacts []model.Contact) ([]byte, erro
 	for _, include := range cfg.Dialplan.Includes {
 		addInclude(include)
 	}
-	for _, context := range conferenceContextOrder {
+	for _, context := range dialplanContextOrder {
 		addInclude(context)
 	}
 	if cfg.Dialplan.Messages.Enabled {
@@ -210,18 +234,24 @@ func RenderExtensions(cfg config.Config, contacts []model.Contact) ([]byte, erro
 		for _, conference := range conferenceByContext[mainContext] {
 			writeConferenceExtension(&b, conference)
 		}
+		for _, application := range applicationByContext[mainContext] {
+			writeApplicationExtension(&b, application)
+		}
 		if cfg.Dialplan.Messages.Enabled && messageContext == mainContext {
 			writeMessageRouting(&b, messagePattern)
 		}
 	})
 
-	for _, context := range conferenceContextOrder {
+	for _, context := range dialplanContextOrder {
 		if context == mainContext {
 			continue
 		}
 		writeSection(&b, context, func() {
 			for _, conference := range conferenceByContext[context] {
 				writeConferenceExtension(&b, conference)
+			}
+			for _, application := range applicationByContext[context] {
+				writeApplicationExtension(&b, application)
 			}
 		})
 	}
@@ -240,6 +270,16 @@ func writeConferenceExtension(b *strings.Builder, conference config.Conference) 
 	fmt.Fprintf(b, "exten => %s,1,Answer()\n", conference.Extension)
 	fmt.Fprintf(b, " same => n,ConfBridge(%s)\n", conference.Room)
 	fmt.Fprintln(b, " same => n,Hangup()")
+}
+
+func writeApplicationExtension(b *strings.Builder, application config.Application) {
+	for i, step := range application.Steps {
+		prefix := " same => n"
+		if i == 0 {
+			prefix = fmt.Sprintf("exten => %s,1", application.Extension)
+		}
+		fmt.Fprintf(b, "%s,%s\n", prefix, strings.TrimSpace(step))
+	}
 }
 
 func writeMessageRouting(b *strings.Builder, pattern string) {

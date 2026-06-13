@@ -11,6 +11,9 @@ import (
 func Build(contacts []model.Contact) ([]byte, error) {
 	book := xmlPhonebook{Contacts: make([]xmlContact, 0, len(contacts))}
 	for _, c := range contacts {
+		if c.Hidden {
+			continue
+		}
 		phones := collectPhones(c)
 		xc := xmlContact{
 			LastName:  strings.TrimSpace(c.LastName),

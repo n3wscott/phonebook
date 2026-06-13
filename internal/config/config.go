@@ -53,10 +53,11 @@ type EndpointConfig struct {
 
 // Dialplan config.
 type Dialplan struct {
-	Context     string       `yaml:"context"`
-	Includes    []string     `yaml:"includes"`
-	Conferences []Conference `yaml:"conferences"`
-	Messages    Messages     `yaml:"messages"`
+	Context      string        `yaml:"context"`
+	Includes     []string      `yaml:"includes"`
+	Conferences  []Conference  `yaml:"conferences"`
+	Applications []Application `yaml:"applications"`
+	Messages     Messages      `yaml:"messages"`
 }
 
 // Conference defines a conference bridge extension.
@@ -64,6 +65,13 @@ type Conference struct {
 	Extension string `yaml:"extension"`
 	Room      string `yaml:"room"`
 	Context   string `yaml:"context"`
+}
+
+// Application defines explicit dialplan steps for an extension.
+type Application struct {
+	Extension string   `yaml:"extension"`
+	Context   string   `yaml:"context"`
+	Steps     []string `yaml:"steps"`
 }
 
 // Messages configures SIP MESSAGE routing context.

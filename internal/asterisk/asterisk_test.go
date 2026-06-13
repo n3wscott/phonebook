@@ -70,6 +70,42 @@ exten => _X.,1,NoOp(Incoming SIP MESSAGE)
 	}
 }
 
+func TestRenderExtensionsWithApplication(t *testing.T) {
+	cfg := sampleConfig()
+	cfg.Dialplan.Applications = []config.Application{{
+		Extension: "5653",
+		Steps: []string{
+			"Answer()",
+			"AGI(/usr/local/libexec/madrona-pbx/jokes agi)",
+			"Hangup()",
+		},
+	}}
+	contacts := append(sampleContacts(), model.Contact{
+		ID:            "joke",
+		FirstName:     "Joke",
+		Extension:     "5653",
+		PhonebookOnly: true,
+		Phones:        []model.Phone{{Number: "5653", AccountIndex: 1}},
+	})
+
+	got, err := RenderExtensions(cfg, contacts)
+	if err != nil {
+		t.Fatalf("RenderExtensions() error = %v", err)
+	}
+
+	want := `[internal]
+exten => 101,1,Dial(PJSIP/101)
+exten => 102,1,Dial(PJSIP/102)
+exten => 5653,1,Answer()
+ same => n,AGI(/usr/local/libexec/madrona-pbx/jokes agi)
+ same => n,Hangup()
+
+`
+	if string(got) != want {
+		t.Fatalf("extensions.conf mismatch\nGot:\n%s\nWant:\n%s", got, want)
+	}
+}
+
 func TestPhonebookOnlyContactDoesNotRenderPJSIPOrDialplan(t *testing.T) {
 	cfg := sampleConfig()
 	cfg.Dialplan.Conferences = []config.Conference{{Extension: "2600", Room: "2600", Context: "conferences"}}
@@ -99,6 +135,43 @@ func TestPhonebookOnlyContactDoesNotRenderPJSIPOrDialplan(t *testing.T) {
 	}
 	if !contains(got, "ConfBridge(2600)") {
 		t.Fatalf("conference extension should still render:\n%s", got)
+	}
+}
+
+func TestHiddenContactStillRendersPJSIPAndDialplan(t *testing.T) {
+	cfg := sampleConfig()
+	contacts := append(sampleContacts(), model.Contact{
+		ID:        "hidden",
+		FirstName: "Hidden",
+		LastName:  "Service",
+		Extension: "5653",
+		Hidden:    true,
+		Auth: model.ContactAuth{
+			Username: "5653",
+			Password: "pw5653",
+		},
+		AOR: model.ContactAOR{
+			MaxContacts:      1,
+			RemoveExisting:   true,
+			QualifyFrequency: 30,
+		},
+		Endpoint: model.ContactEndpoint{Template: "endpoint-template"},
+	})
+
+	pjsip, err := RenderPJSIP(cfg, contacts)
+	if err != nil {
+		t.Fatalf("RenderPJSIP() error = %v", err)
+	}
+	if got := string(pjsip); !contains(got, "[5653]") || !contains(got, "password=pw5653") {
+		t.Fatalf("hidden contact should render PJSIP sections:\n%s", got)
+	}
+
+	extensions, err := RenderExtensions(cfg, contacts)
+	if err != nil {
+		t.Fatalf("RenderExtensions() error = %v", err)
+	}
+	if got := string(extensions); !contains(got, "exten => 5653,1,Dial(PJSIP/5653)") {
+		t.Fatalf("hidden contact should render direct dialplan:\n%s", got)
 	}
 }
 

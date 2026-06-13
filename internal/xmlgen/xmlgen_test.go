@@ -29,6 +29,15 @@ func TestBuildMatchesGolden(t *testing.T) {
 				{Number: "6000", AccountIndex: 2},
 			},
 		},
+		{
+			FirstName: "Hidden",
+			LastName:  "Service",
+			Extension: "5653",
+			Hidden:    true,
+			Phones: []model.Phone{
+				{Number: "5653", AccountIndex: 1},
+			},
+		},
 	}
 
 	got, err := Build(contacts)

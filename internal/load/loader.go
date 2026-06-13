@@ -174,6 +174,7 @@ type rawContact struct {
 	GroupID       *int        `yaml:"group_id"`
 	Nickname      string      `yaml:"nickname"`
 	PhonebookOnly bool        `yaml:"phonebook_only"`
+	Hidden        bool        `yaml:"hidden"`
 	Phones        []rawPhone  `yaml:"phones"`
 	Auth          rawAuth     `yaml:"auth"`
 	AOR           rawAOR      `yaml:"aor"`
@@ -281,6 +282,7 @@ func (rc rawContact) Normalize(fd fileDescriptor, defs config.Defaults, template
 		Phones:        phones,
 		Nickname:      strings.TrimSpace(rc.Nickname),
 		PhonebookOnly: rc.PhonebookOnly,
+		Hidden:        rc.Hidden,
 		Auth: model.ContactAuth{
 			Username: username,
 			Password: password,

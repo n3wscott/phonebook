@@ -38,6 +38,7 @@ type Contact struct {
 	Phones        []Phone
 	Nickname      string
 	PhonebookOnly bool
+	Hidden        bool
 
 	Auth     ContactAuth
 	AOR      ContactAOR

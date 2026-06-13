@@ -12,7 +12,7 @@ Grandstream phonebook server + Asterisk config generator backed by a single YAML
     **/*.yaml
 ```
 
-`config.yaml` defines `[global]`, transports, endpoint templates, and dialplan behavior used when rendering `pjsip.conf`/`extensions.conf` (including optional `dialplan.includes`, `dialplan.conferences`, and `dialplan.messages`). `defaults.yaml` provides repo-wide fallback values (see [examples](examples/)).
+`config.yaml` defines `[global]`, transports, endpoint templates, and dialplan behavior used when rendering `pjsip.conf`/`extensions.conf` (including optional `dialplan.includes`, `dialplan.conferences`, `dialplan.applications`, and `dialplan.messages`). `defaults.yaml` provides repo-wide fallback values (see [examples](examples/)).
 
 Each contact entry contains PBX credentials + XML fields:
 
@@ -40,6 +40,7 @@ contacts:
 
 Validation highlights:
 - `ext`/`password` required for SIP contacts; `phonebook_only: true` entries require only `ext` and a name and are omitted from generated SIP auth/AOR and direct-dial dialplan output.
+- `hidden: true` keeps a SIP contact in generated Asterisk config but omits it from generated XML phonebook output.
 - Duplicates are allowed but last writer wins (with a warning).
 - Phone numbers may only contain digits plus `+ * # ,` (spaces are stripped).
 - `account_index` ∈ `[1,6]`, `group_id` ∈ `[0,9]`.

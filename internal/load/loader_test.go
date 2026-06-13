@@ -109,6 +109,37 @@ func TestLoaderParsesPhonebookOnlyContactWithoutPassword(t *testing.T) {
 	}
 }
 
+func TestLoaderParsesHiddenContact(t *testing.T) {
+	root := t.TempDir()
+	writeContactFile(t, root, "contacts/services.yaml", `contacts:
+  - id: hidden
+    first_name: Hidden
+    last_name: Service
+    ext: "5653"
+    password: "pw"
+    hidden: true
+`)
+	cfg, defs := testConfig()
+	loader := load.New(root, testutil.NewTestLogger())
+	res, err := loader.LoadContacts(cfg, defs)
+	if err != nil {
+		t.Fatalf("LoadContacts() error = %v", err)
+	}
+	if len(res.Contacts) != 1 {
+		t.Fatalf("expected 1 contact, got %d", len(res.Contacts))
+	}
+	contact := res.Contacts[0]
+	if !contact.Hidden {
+		t.Fatalf("expected hidden contact: %+v", contact)
+	}
+	if contact.PhonebookOnly {
+		t.Fatalf("hidden contact should still be an Asterisk contact: %+v", contact)
+	}
+	if contact.Auth.Username != "5653" || contact.Auth.Password != "pw" {
+		t.Fatalf("hidden contact should keep auth for Asterisk: %+v", contact.Auth)
+	}
+}
+
 func TestLoaderSkipsInvalid(t *testing.T) {
 	root := t.TempDir()
 	writeContactFile(t, root, "contacts/users.yaml", `contacts:
