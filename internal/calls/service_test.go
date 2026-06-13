@@ -155,3 +155,28 @@ func TestHandleAMIEventPresenceEndpointListUsesActiveChannels(t *testing.T) {
 		t.Fatalf("expected presence state in-use, got %q", snap.Presences[0].State)
 	}
 }
+
+func TestHandleAMIEventPresenceEndpointListStatusOverridesIdleDeviceState(t *testing.T) {
+	svc := NewService(Options{MaxHistory: 100, Retention: 7 * 24 * time.Hour}, testLogger{})
+	svc.HandleAMIEvent(map[string]string{
+		"Event":          "EndpointList",
+		"ObjectName":     "edge-in",
+		"Status":         "Unavailable",
+		"DeviceState":    "Not in use",
+		"ActiveChannels": "0",
+	})
+
+	snap := svc.Snapshot()
+	if len(snap.Presences) != 1 {
+		t.Fatalf("expected 1 presence, got %d", len(snap.Presences))
+	}
+	if snap.Presences[0].ID != "edge" {
+		t.Fatalf("expected presence id edge, got %q", snap.Presences[0].ID)
+	}
+	if snap.Presences[0].State != "disconnected" {
+		t.Fatalf("expected presence state disconnected, got %q", snap.Presences[0].State)
+	}
+	if snap.Presences[0].Detail != "Unavailable" {
+		t.Fatalf("expected detail Unavailable, got %q", snap.Presences[0].Detail)
+	}
+}

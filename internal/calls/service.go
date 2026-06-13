@@ -727,13 +727,13 @@ func cleanPresenceID(raw string) string {
 }
 
 func presenceStateFor(eventType string, event map[string]string) (string, string) {
-	raw := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+	raw := strings.TrimSpace(firstNonEmpty(
 		eventValue(event, "DeviceState"),
 		eventValue(event, "Status"),
 		eventValue(event, "EndpointStatus"),
 		eventValue(event, "PeerStatus"),
 		eventValue(event, "State"),
-	)))
+	))
 	detail := strings.TrimSpace(firstNonEmpty(
 		eventValue(event, "ActiveChannels"),
 		eventValue(event, "Cause"),
@@ -746,10 +746,19 @@ func presenceStateFor(eventType string, event map[string]string) (string, string
 			return "in-use", detail
 		}
 	}
+	statusRaw := strings.TrimSpace(firstNonEmpty(
+		eventValue(event, "Status"),
+		eventValue(event, "EndpointStatus"),
+		eventValue(event, "PeerStatus"),
+		eventValue(event, "ContactStatus"),
+	))
+	if statusRaw != "" && isDisconnectedPresenceValue(statusRaw) {
+		return "disconnected", statusRaw
+	}
 	if raw == "" {
 		raw = eventType
 	}
-	normalized := strings.NewReplacer(" ", "", "_", "", "-", "").Replace(raw)
+	normalized := normalizePresenceValue(raw)
 	switch {
 	case strings.Contains(normalized, "inuse"), strings.Contains(normalized, "busy"), strings.Contains(normalized, "onhold"), strings.Contains(normalized, "ring"), strings.Contains(normalized, "dial"):
 		return "in-use", detail
@@ -760,6 +769,23 @@ func presenceStateFor(eventType string, event map[string]string) (string, string
 	default:
 		return "disconnected", detail
 	}
+}
+
+func isDisconnectedPresenceValue(raw string) bool {
+	normalized := normalizePresenceValue(raw)
+	return strings.Contains(normalized, "unreachable") ||
+		strings.Contains(normalized, "offline") ||
+		strings.Contains(normalized, "unavailable") ||
+		strings.Contains(normalized, "nonqualified") ||
+		strings.Contains(normalized, "unknown") ||
+		strings.Contains(normalized, "lagged") ||
+		strings.Contains(normalized, "removed") ||
+		strings.Contains(normalized, "invalid") ||
+		strings.Contains(normalized, "failed")
+}
+
+func normalizePresenceValue(raw string) string {
+	return strings.NewReplacer(" ", "", "_", "", "-", "").Replace(strings.ToLower(strings.TrimSpace(raw)))
 }
 
 func parseDialString(raw string) string {
